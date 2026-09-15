@@ -1,0 +1,75 @@
+{
+  "name": "autosocial-studio",
+  "version": "0.1.0",
+  "description": "Local multi-account social media automation dashboard for TikTok, Instagram, and YouTube",
+  "private": true,
+  "main": "src/cli.js",
+  "scripts": {
+    "start": "node src/dashboard-server.js",
+    "clean:debug": "node scripts/clean-runtime.js",
+    "check": "npm run check:syntax && npm run check:studio && npm test && npm run build:studio",
+    "check:syntax": "node scripts/check-syntax.js",
+    "doctor": "node scripts/doctor.js",
+    "test": "node --test",
+    "login": "node src/cli.js login",
+    "post": "node src/cli.js post",
+    "daemon": "node src/cli.js daemon",
+    "dashboard": "node src/dashboard-server.js",
+    "uniquify": "node src/cli.js uniquify",
+    "video-info": "node src/cli.js video-info",
+    "autodownload": "node autodownload/watcher.js",
+    "prestart": "npm run build:studio",
+    "build": "npm run build:studio",
+    "build:studio": "vite build --config studio-ui/vite.config.ts && node scripts/copy-vendor-assets.js",
+    "check:studio": "tsc -p studio-ui/tsconfig.json --noEmit",
+    "validate:studio-media": "node scripts/validate-studio-media.js",
+    "predashboard": "npm run build:studio"
+  },
+  "keywords": [
+    "automation",
+    "dashboard",
+    "creator-tools",
+    "marketing",
+    "social-media",
+    "indie-hackers",
+    "ai-builders",
+    "playwright",
+    "tiktok",
+    "instagram",
+    "youtube"
+  ],
+  "author": "AutoSocial Studio contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Katzca/AutoSocial.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Katzca/AutoSocial/issues"
+  },
+  "homepage": "https://github.com/Katzca/AutoSocial#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@phosphor-icons/web": "^2.1.2",
+    "@xyflow/react": "^12.11.6",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "luxon": "^3.7.2",
+    "node-cron": "^4.6.0",
+    "playwright": "^1.58.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "yargs": "^17.7.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3"
+  }
+}

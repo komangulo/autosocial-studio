@@ -1,0 +1,9 @@
+1. Cierra el dashboard y el proceso de Node.
+2. Extrae este ZIP sobre la carpeta del proyecto y acepta sobrescribir.
+3. Comprueba que .runtime/competitor/settings.json conserva las dos keys:
+   - freeGeminiApiKey: key gratuita para gemini-2.5-flash
+   - paidGeminiApiKey/geminiApiKey: key de pago para gemini-3.6-flash
+4. Arranca el dashboard y ejecuta Auto Clone.
+5. En el progreso debe aparecer primero "Gemini gratis" y después
+   "Gemini de pago activo (gemini-3.6-flash)" cuando la cuota gratuita dé 429.
+6. OpenRouter solo debe aparecer si Gemini de pago también falla.

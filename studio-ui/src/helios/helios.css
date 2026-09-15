@@ -1,0 +1,189 @@
+.helios-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 620px;
+  background: #0b0d12;
+  color: #e6e9f0;
+  border: 1px solid #232a38;
+  border-radius: 12px;
+  overflow: hidden;
+  font: 13px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+.helios-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #232a38;
+  background: #10141c;
+  flex-wrap: wrap;
+}
+
+.helios-brand { display: flex; align-items: center; gap: 10px; }
+.helios-logo {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #5b8cff, #8a6bff);
+  font-weight: 700; font-size: 12px;
+}
+.helios-project-name {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #e6e9f0;
+  font: inherit; font-weight: 600; font-size: 14px;
+  padding: 5px 8px;
+  min-width: 180px;
+}
+.helios-project-name:hover { border-color: #232a38; }
+.helios-project-name:focus { outline: none; border-color: #5b8cff; }
+
+.helios-addbar { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.helios-addbar button, .helios-actions button {
+  background: #171d28;
+  border: 1px solid #232a38;
+  color: #c8cfdd;
+  border-radius: 7px;
+  padding: 6px 11px;
+  font: inherit; font-size: 12.5px;
+  cursor: pointer;
+}
+.helios-addbar button:hover, .helios-actions button:hover { border-color: #3c4561; color: #fff; }
+.helios-actions { display: flex; gap: 6px; }
+.helios-actions button.primary {
+  background: linear-gradient(135deg, #5b8cff, #6f6bff);
+  border-color: transparent; color: #fff; font-weight: 600;
+}
+.helios-actions button:disabled { opacity: .6; cursor: default; }
+
+.helios-message {
+  padding: 7px 14px;
+  background: #14202e;
+  border-bottom: 1px solid #232a38;
+  color: #9ecbff;
+  font-size: 12.5px;
+}
+
+.helios-canvas-wrap { position: relative; flex: 1; min-height: 0; }
+.helios-canvas-wrap .react-flow { background: #0b0d12; }
+.helios-canvas-wrap .react-flow__node { font-family: inherit; }
+
+/* ---- custom nodes ---- */
+.hf-node {
+  width: 260px;
+  background: #141821;
+  border: 1px solid #232a38;
+  border-top: 3px solid #5b8cff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  overflow: hidden;
+}
+.hf-node.is-selected { border-color: #5b8cff; box-shadow: 0 0 0 2px rgba(91,140,255,.35); }
+.hf-node-head {
+  padding: 7px 10px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: #9aa4ba;
+  border-bottom: 1px solid #1d2432;
+}
+.hf-node-body { padding: 9px; display: flex; flex-direction: column; gap: 8px; }
+.hf-node-meta { font-size: 11px; color: #7d879c; }
+
+.hf-textarea, .hf-code, .hf-select {
+  width: 100%;
+  background: #0d1118;
+  border: 1px solid #232a38;
+  border-radius: 7px;
+  color: #dbe1ee;
+  font: inherit; font-size: 12px;
+  padding: 7px 8px;
+  resize: vertical;
+}
+.hf-code { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 11.5px; line-height: 1.45; }
+.hf-textarea:focus, .hf-code:focus, .hf-select:focus { outline: none; border-color: #5b8cff; }
+
+.hf-format-tabs { display: flex; gap: 4px; }
+.hf-format-tabs button {
+  flex: 1;
+  background: #0d1118; border: 1px solid #232a38; color: #8b93a7;
+  border-radius: 6px; padding: 4px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.hf-format-tabs button.active { background: #1b2436; color: #fff; border-color: #5b8cff; }
+
+.hf-drop {
+  display: grid; place-items: center;
+  padding: 14px;
+  border: 1px dashed #33405a;
+  border-radius: 8px;
+  color: #9aa4ba; font-size: 12px;
+  cursor: pointer;
+}
+.hf-drop:hover { border-color: #5b8cff; color: #fff; }
+.hf-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+.hf-thumb { position: relative; width: 52px; height: 52px; border-radius: 6px; overflow: hidden; border: 1px solid #232a38; }
+.hf-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hf-thumb button {
+  position: absolute; top: 1px; right: 1px;
+  width: 17px; height: 17px; border: 0; border-radius: 50%;
+  background: rgba(0,0,0,.7); color: #fff; cursor: pointer; line-height: 1; font-size: 12px;
+}
+.hf-result { width: 100%; border-radius: 7px; display: block; background: #000; max-height: 220px; object-fit: contain; }
+.hf-placeholder { padding: 20px 8px; text-align: center; color: #626c80; font-size: 12px; border: 1px dashed #232a38; border-radius: 7px; }
+
+.hf-handle { width: 9px; height: 9px; background: #5b8cff; border: 2px solid #0b0d12; }
+
+/* ---- drawers ---- */
+.helios-drawer {
+  position: absolute; top: 12px; left: 12px; z-index: 10;
+  width: 300px; max-height: calc(100% - 24px);
+  background: #10141c;
+  border: 1px solid #232a38;
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0,0,0,.5);
+  padding: 12px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.helios-settings-drawer { left: auto; right: 12px; width: 340px; }
+.helios-drawer-head { display: flex; align-items: center; justify-content: space-between; }
+.helios-drawer-head button, .helios-drawer-item .ghost {
+  background: transparent; border: 0; color: #8b93a7; cursor: pointer; font-size: 16px;
+}
+.helios-drawer-new {
+  background: #171d28; border: 1px dashed #33405a; color: #c8cfdd;
+  border-radius: 8px; padding: 8px; cursor: pointer; font: inherit; font-size: 12.5px;
+}
+.helios-drawer-item { display: flex; align-items: center; gap: 6px; }
+.helios-drawer-item > button:first-child {
+  flex: 1; text-align: left;
+  background: #141821; border: 1px solid #232a38; border-radius: 8px;
+  padding: 8px 10px; cursor: pointer; color: #dbe1ee; font: inherit;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.helios-drawer-item > button:first-child:hover { border-color: #5b8cff; }
+.helios-drawer-item small { color: #7d879c; font-size: 11px; }
+.helios-drawer-empty { color: #626c80; font-size: 12px; text-align: center; padding: 12px; }
+
+.helios-provider-list { display: flex; flex-direction: column; gap: 6px; }
+.helios-provider-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 9px; border: 1px solid #232a38; border-radius: 8px;
+}
+.helios-provider-row strong { display: block; font-size: 12.5px; }
+.helios-provider-row small { color: #7d879c; font-size: 11px; }
+.helios-provider-row a { color: #5b8cff; font-size: 11.5px; text-decoration: none; }
+.helios-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #9aa4ba; }
+.helios-field input {
+  background: #0d1118; border: 1px solid #232a38; border-radius: 7px;
+  color: #dbe1ee; padding: 7px 8px; font: inherit;
+}
+.helios-field input:focus { outline: none; border-color: #5b8cff; }
+.helios-hint { color: #626c80; font-size: 11.5px; margin: 4px 0 0; }
+
+.helios-shell button.primary {
+  background: linear-gradient(135deg, #5b8cff, #6f6bff);
+  border: 0; color: #fff; border-radius: 7px; padding: 8px; cursor: pointer; font: inherit; font-weight: 600;
+}

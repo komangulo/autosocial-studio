@@ -1,0 +1,7 @@
+1. Cierra el dashboard.
+2. Extrae este ZIP sobre la carpeta del proyecto y acepta sobrescribir.
+3. Vuelve a iniciar la aplicación.
+4. En TikTok > Autonomous Jobs pulsa "Eliminar pendientes".
+
+El botón cancela y elimina los trabajos TikTok pendientes y devuelve sus vídeos
+a la cola pending. No toca trabajos en curso, completados, fallidos ni de Google Flow.

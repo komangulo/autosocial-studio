@@ -1,0 +1,9 @@
+1. Cierra el dashboard.
+2. Extrae este ZIP sobre la carpeta del proyecto y acepta sobrescribir.
+3. Vuelve a iniciar la aplicación.
+4. Abre Auto Clone.
+5. En "Idioma del titulo y descripcion", deja "Espanol".
+6. Pulsa "Clonar ahora".
+
+Auto Clone traducira el titulo, la descripcion y el caption al crear cada .meta.json.
+Los hashtags se conservan sin cambios.
