@@ -90,7 +90,7 @@ class CompetitorController extends EventEmitter {
     super();
     this.setMaxListeners(200);
     this.running = false;
-    this.settings = { geminiApiKey: "", paidGeminiApiKey: "", freeGeminiApiKey: "", openRouterApiKey: "", model: aiAnalyst.DEFAULT_MODEL, brand: "", language: "es" };
+    this.settings = { geminiApiKey: "", paidGeminiApiKey: "", freeGeminiApiKey: "", openRouterApiKey: "", deepSeekApiKey: "", model: aiAnalyst.DEFAULT_MODEL, brand: "", language: "es" }; // DS[settings]
     this.lastProgress = { stage: "idle", detail: "", handle: "", at: null };
   }
 
@@ -105,6 +105,9 @@ class CompetitorController extends EventEmitter {
       hasGeminiKey: Boolean(this.settings.paidGeminiApiKey || this.settings.geminiApiKey),
       hasPaidGeminiKey: Boolean(this.settings.paidGeminiApiKey || this.settings.geminiApiKey),
       hasOpenRouterKey: Boolean(this.settings.openRouterApiKey),
+      hasDeepSeekKey: Boolean(this.settings.deepSeekApiKey),
+      deepSeekKeyMasked: this.settings.deepSeekApiKey ? `${this.settings.deepSeekApiKey.slice(0, 6)}...${this.settings.deepSeekApiKey.slice(-4)}` : "",
+      deepSeekModel: "deepseek-flash", // DS[status]
       hasFreeGeminiKey: Boolean(this.settings.freeGeminiApiKey),
       geminiKeyMasked: this.settings.geminiApiKey ? `${this.settings.geminiApiKey.slice(0, 4)}${"*".repeat(8)}${this.settings.geminiApiKey.slice(-4)}` : "",
       model: this.settings.model,
@@ -163,6 +166,11 @@ class CompetitorController extends EventEmitter {
       else if (patch.openRouterApiKey === "") this.settings.openRouterApiKey = "";
     }
     if (patch.removeOpenRouter) this.settings.openRouterApiKey = "";
+    if (typeof patch.deepSeekApiKey === "string") {
+      if (patch.deepSeekApiKey.trim()) this.settings.deepSeekApiKey = patch.deepSeekApiKey.trim();
+      else if (patch.deepSeekApiKey === "") this.settings.deepSeekApiKey = "";
+    }
+    if (patch.removeDeepSeek) this.settings.deepSeekApiKey = ""; // DS[save]
     if (typeof patch.model === "string" && patch.model.trim()) this.settings.model = patch.model.trim();
     if (typeof patch.brand === "string") this.settings.brand = patch.brand.trim().slice(0, 120);
     if (typeof patch.language === "string") this.settings.language = patch.language.trim().slice(0, 20) || "es";

@@ -2284,13 +2284,29 @@ async function holdBrowserBeforeClose(page, holdMs, reason) {
 async function closeCurrentLoginContext() {
   if (!loginSessionContext) return false;
   const context = loginSessionContext;
+  const accountId = loginSessionAccountId;
+  // Save the session cookies for yt-dlp BEFORE closing: Playwright hands them
+  // to us directly, so no DPAPI decryption is involved. Best effort only.
+  if (accountId) {
+    try {
+      const jar = require("./cookie-jar");
+      const saved = await jar.saveCookiesFromContext(context, accountId);
+      if (saved.ok) {
+        console.log(`Saved ${saved.count} cookies for account ${accountId}.`);
+      } else {
+        console.log(`Could not save cookies for ${accountId}: ${saved.error}`);
+      }
+    } catch (error) {
+      console.log(`Could not save cookies for ${accountId}: ${error.message}`);
+    }
+  }
   loginSessionContext = null;
   loginSessionAccountId = null;
   tempMailSetupPage = null;
   tempMailCaptureHandler = null;
   await context.close().catch(() => { });
   return true;
-}
+} // CK[dump]
 
 async function openLoginContextForAccount(accountId) {
   await requireAccount(accountId);

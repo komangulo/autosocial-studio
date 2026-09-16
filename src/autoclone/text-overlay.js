@@ -14,6 +14,8 @@ const { spawn } = require("child_process");
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const DEEPSEEK_BASE = "https://api.deepseek.com/v1";
+const DEEPSEEK_MODEL = "deepseek-flash"; // DS[consts]
 const DEFAULT_VISION_MODEL = "gemini-3.6-flash";
 // Free-tier key: only these (gemini-2.5-flash is what the free quota covers).
 const FREE_VISION_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"];
@@ -266,7 +268,37 @@ async function callOpenRouterVision(apiKey, model, frameParts, videoWidth, video
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function fileToBase64(filePath) {
+// DeepSeek V4.1 Flash (deepseek-flash): OpenAI-compatible, vision nativa.
+// Cada imagen cuesta como maximo 384 tokens de entrada.
+async function callDeepSeekVision(apiKey, model, frameParts, videoWidth, videoHeight) {
+  const content = [{ type: "text", text: `Resolucion del video: ${videoWidth}x${videoHeight}. Fotogramas:` }];
+  for (const part of frameParts) {
+    if (part.text) content.push({ type: "text", text: part.text });
+    else if (part.inline_data) content.push({ type: "image_url", image_url: { url: `data:${part.inline_data.mime_type};base64,${part.inline_data.data}` } });
+  }
+  const response = await fetch(`${DEEPSEEK_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: model || DEEPSEEK_MODEL,
+      messages: [{ role: "system", content: VISION_SYSTEM }, { role: "user", content }],
+      temperature: 0.1,
+      max_tokens: 8192,
+      response_format: { type: "json_object" },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.error?.message || `DeepSeek respondio ${response.status}`;
+    if (/api key|unauthor|invalid|authentication/i.test(message)) throw new Error("La API key de DeepSeek no es valida.");
+    const error = new Error(message);
+    if (response.status === 429) error.code = 429;
+    throw error;
+  }
+  return data.choices?.[0]?.message?.content || "";
+}
+
+async function fileToBase64(filePath) { // DS[fn]
   return (await fs.readFile(filePath)).toString("base64");
 }
 
@@ -274,8 +306,8 @@ async function fileToBase64(filePath) {
  * Detect on-screen text across the whole video and translate it to Spanish.
  * Returns [{ start, end, original, translated, x, y, w, h, confidence }]
  */
-async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidModel = DEFAULT_VISION_MODEL, openRouterKey = "", model = DEFAULT_VISION_MODEL, workDir, onProgress } = {}) {
-  if (!apiKey && !paidApiKey && !openRouterKey) throw new Error("Falta la API key de IA para leer el texto en pantalla.");
+async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidModel = DEFAULT_VISION_MODEL, openRouterKey = "", deepSeekKey = "", model = DEFAULT_VISION_MODEL, workDir, onProgress } = {}) {
+  if (!apiKey && !paidApiKey && !openRouterKey && !deepSeekKey) throw new Error("Falta la API key de IA para leer el texto en pantalla."); // DS[sig]
   const { width, height } = await probeSize(videoPath);
   const frameDir = path.join(workDir, "frames");
   onProgress?.({ stage: "text-frames", detail: "Extrayendo fotogramas para leer el texto..." });
@@ -288,6 +320,7 @@ async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidMode
   const results = [];
   let freeQuotaGone = false;
   let openRouterDown = false;
+  let deepSeekDown = false; // DS[flag]
   const paidErrors = [];
   const sameGeminiKey = Boolean(apiKey && paidApiKey && apiKey === paidApiKey);
   onProgress?.({
@@ -322,7 +355,26 @@ async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidMode
       }
     }
 
-    // 2) Free quota exhausted: switch to the paid Gemini key (gemini-3.6-flash)
+    // 2) DeepSeek V4.1 Flash (deepseek-flash) — pago, con vision nativa y
+    //    ~6.7x mas barato que Gemini de pago. Se usa cuando la cuota gratis
+    //    de Gemini se agota. Si falla, se cae a Gemini de pago y luego a
+    //    OpenRouter.
+    if (text === null && deepSeekKey && !deepSeekDown) {
+      try {
+        onProgress?.({ stage: "text-fallback", detail: "Cuota gratis agotada; usando DeepSeek 4.1 Flash..." });
+        const answer = await callDeepSeekVision(deepSeekKey, DEEPSEEK_MODEL, parts, width, height);
+        if (answer && answer.trim()) {
+          text = answer;
+          onProgress?.({ stage: "text-fallback", detail: "Traduciendo con DeepSeek 4.1 Flash..." });
+        }
+      } catch (error) {
+        lastError = error;
+        if (/no es valida/i.test(error.message)) deepSeekDown = true;
+        onProgress?.({ stage: "text-warning", detail: `DeepSeek no pudo leer el lote: ${error.message}` });
+      }
+    }
+
+    // 2b) Free quota exhausted: switch to the paid Gemini key (gemini-3.6-flash) // DS[chain]
     //    for this and every following batch.
     if (text === null && paidApiKey && (quotaHit || freeQuotaGone || !apiKey || lastError)) {
       if (!freeQuotaGone) onProgress?.({ stage: "text-fallback", detail: "Cuota gratis agotada; usando Gemini de pago (gemini-3.6-flash)..." });

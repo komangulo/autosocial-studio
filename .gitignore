@@ -63,3 +63,6 @@ queue/**/*.txt
 # Keep docs visible
 !README.md
 !SETUP.md
+
+# Per-account cookies exported for yt-dlp (live sessions)
+.runtime/cookies/

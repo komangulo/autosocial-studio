@@ -318,7 +318,15 @@
             <button id="autocloneSaveKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
           </div>
           <p class="helios-hint" id="autocloneKeyStatus"></p>
-        </div>
+
+          <div class="card-title" style="margin-top:18px;">API key de DeepSeek (4.1 Flash)</div>
+          <p class="form-hint">Se usa cuando se agota la cuota gratis de Gemini. En vision sale ~6.7x mas barato que Gemini de pago. Se guarda localmente.</p>
+          <div class="helios-key-row">
+            <input id="autocloneDeepSeekKey" class="control-input" type="password" placeholder="sk-..." />
+            <button id="autocloneSaveDeepSeekKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
+          </div>
+          <p class="helios-hint" id="autocloneDeepSeekStatus"></p>
+        </div> // DS[ui-panel]
 
         <div class="autoclone-main">
           <div class="card autoclone-progress-card">

@@ -32,6 +32,9 @@
     destination: $("autocloneDestination"),
     destHint: $("autocloneDestHint"),
     openFolderBtn: $("autocloneOpenFolderBtn"),
+    deepSeekKey: $("autocloneDeepSeekKey"),
+    saveDeepSeekKeyBtn: $("autocloneSaveDeepSeekKeyBtn"),
+    deepSeekStatus: $("autocloneDeepSeekStatus"), // DS[ui-els]
   };
   if (!els.startBtn) return;
 
@@ -127,6 +130,11 @@
           ? `API key guardada (${data.settings?.geminiKeyMasked || "oculta"}). El texto en pantalla se traducirá automáticamente.`
           : "No hay API key. Sin ella no se puede traducir el texto en pantalla.";
       }
+      if (els.deepSeekStatus) {
+        els.deepSeekStatus.textContent = data.settings?.hasDeepSeekKey
+          ? `DeepSeek configurado (${data.settings?.deepSeekKeyMasked || "oculta"}).`
+          : "DeepSeek sin configurar.";
+      } // DS[ui-state]
       return hasKey;
     } catch {
       els.keyBadge.textContent = "Sin API de IA";
@@ -150,7 +158,23 @@
     }
   }
 
-  function renderJob(job) {
+  async function saveDeepSeekKey() {
+    const key = els.deepSeekKey.value.trim();
+    if (!key) { els.deepSeekStatus.textContent = "Escribe la API key de DeepSeek."; return; }
+    els.saveDeepSeekKeyBtn.disabled = true;
+    try {
+      await API.post("/api/competitor/settings", { deepSeekApiKey: key });
+      els.deepSeekKey.value = "";
+      els.deepSeekStatus.textContent = "API key de DeepSeek guardada.";
+      await refreshKeyState();
+    } catch (error) {
+      els.deepSeekStatus.textContent = error.message;
+    } finally {
+      els.saveDeepSeekKeyBtn.disabled = false;
+    }
+  }
+
+  function renderJob(job) { // DS[ui-save]
     if (!job) return;
     if (job.analysis && (job.analysis.summary || job.analysis.error)) {
       els.analysis.hidden = false;
@@ -347,6 +371,7 @@
   els.cancelBtn.addEventListener("click", cancel);
   els.keyBtn.addEventListener("click", () => { els.keyPanel.hidden = !els.keyPanel.hidden; });
   els.saveKeyBtn.addEventListener("click", saveKey);
+  els.saveDeepSeekKeyBtn?.addEventListener("click", saveDeepSeekKey); // DS[ui-bind]
   els.username.addEventListener("keydown", (event) => { if (event.key === "Enter") start(); });
   els.openFolderBtn?.addEventListener("click", openFolder);
   els.resetHistoryBtn?.addEventListener("click", resetHistory);

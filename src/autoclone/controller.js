@@ -280,8 +280,20 @@ class AutoCloneController extends EventEmitter {
     this.emit("progress", this.lastProgress);
   }
 
+  /** Cookie flags for the active account, so yt-dlp can use the saved session. */
+  async _cookieArgs() {
+    try {
+      const { getActiveAccount } = require("../account-manager");
+      const jar = require("../cookie-jar");
+      const account = await getActiveAccount();
+      return await jar.cookieArgsForAccount(account && account.id ? account.id : "default");
+    } catch {
+      return [];
+    }
+  }
+
   /** Read the Gemini key saved by the Competencia section so both share it. */
-  async _aiSettings() {
+  async _aiSettings() { // CK[read]
     const competitorSettings = await readJson(
       path.resolve(config.projectRoot, ".runtime", "competitor", "settings.json"),
       {},
@@ -299,6 +311,7 @@ class AutoCloneController extends EventEmitter {
         || "",
       paidModel: competitorSettings.paidGeminiModel || process.env.GEMINI_PAID_MODEL || "gemini-3.6-flash",
       openRouterKey: competitorSettings.openRouterApiKey || process.env.OPENROUTER_API_KEY || "",
+      deepSeekKey: competitorSettings.deepSeekApiKey || process.env.DEEPSEEK_API_KEY || "", // DS[ac-read]
       model: competitorSettings.model || "gemini-3.6-flash",
       visionModel: process.env.AUTOCLONE_VISION_MODEL || competitorSettings.model || "gemini-3.6-flash",
     };
@@ -514,13 +527,14 @@ class AutoCloneController extends EventEmitter {
       const target = path.join(downloadDir, `${id}.mp4`);
       this._report("download", `Descargando el video indicado...`, { percent: 15 });
       try {
+        const cookieArgs = await this._cookieArgs();
         const downloadArgs = [
-          "--no-warnings", "-f", "mp4/bestvideo*+bestaudio/best",
+          "--no-warnings", ...cookieArgs, "-f", "mp4/bestvideo*+bestaudio/best",
           "--merge-output-format", "mp4", "-o", target,
           "--write-info-json",
         ];
         if (job.options.downloadThumbnail) downloadArgs.push("--write-thumbnail");
-        downloadArgs.push(job.videoUrl);
+        downloadArgs.push(job.videoUrl); // CK[single]
         await run(ytDlp, downloadArgs, { timeout: 600_000 });
         const stat = await fs.stat(target).catch(() => null);
         if (!stat || stat.size < 1024) throw new Error("descarga vacia");
@@ -559,7 +573,8 @@ class AutoCloneController extends EventEmitter {
       : await readHistory(job.handle);
     job.historyCount = history.downloadedIds.length;
 
-    const listArgs = ["--no-warnings", "--flat-playlist", "--print", "%(id)s"];
+    const cookieArgs = await this._cookieArgs();
+    const listArgs = ["--no-warnings", ...cookieArgs, "--flat-playlist", "--print", "%(id)s"]; // CK[list]
     if (job.options.downloadOrder === "oldest") listArgs.push("--playlist-reverse");
     listArgs.push(job.url);
 
@@ -590,12 +605,12 @@ class AutoCloneController extends EventEmitter {
       this._report("download", `Descargando video ${index + 1}/${selected.length}...`, { percent: 15 });
       try {
         const downloadArgs = [
-          "--no-warnings", "-f", "mp4/bestvideo*+bestaudio/best",
+          "--no-warnings", ...cookieArgs, "-f", "mp4/bestvideo*+bestaudio/best",
           "--merge-output-format", "mp4", "-o", target,
           "--write-info-json",
         ];
         if (job.options.downloadThumbnail) downloadArgs.push("--write-thumbnail");
-        downloadArgs.push(`https://www.tiktok.com/${job.handle}/video/${id}`);
+        downloadArgs.push(`https://www.tiktok.com/${job.handle}/video/${id}`); // CK[loop]
         await run(ytDlp, downloadArgs, { timeout: 600_000 });
         const stat = await fs.stat(target).catch(() => null);
         if (!stat || stat.size < 1024) throw new Error("descarga vacia");
@@ -660,7 +675,7 @@ class AutoCloneController extends EventEmitter {
     }
 
     if (job.options.translate) {
-      if (!ai.apiKey && !ai.paidApiKey && !ai.openRouterKey) {
+      if (!ai.apiKey && !ai.paidApiKey && !ai.openRouterKey && !ai.deepSeekKey) { // DS[ac-guard]
         video.notes.push("Sin API key de IA: no se pudo traducir el texto en pantalla.");
         this._report("translate-warning", "Sin API key de IA; se omite la traduccion del texto en pantalla.", {});
       } else {
@@ -670,7 +685,8 @@ class AutoCloneController extends EventEmitter {
           paidApiKey: ai.paidApiKey,
           paidModel: ai.paidModel,
           openRouterKey: ai.openRouterKey,
-          model: ai.visionModel,
+          deepSeekKey: ai.deepSeekKey,
+          model: ai.visionModel, // DS[ac-pass]
           workDir,
           onProgress,
         });
