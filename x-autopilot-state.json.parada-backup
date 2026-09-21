@@ -1,0 +1,153 @@
+{
+  "accounts": {
+    "amo-dominante": {
+      "config": {
+        "enabled": false,
+        "postsPerDay": 3,
+        "postingMode": "simulation",
+        "accountTier": "free",
+        "contentMode": "ai",
+        "searchTopic": "",
+        "referenceHandle": "levelsio",
+        "dailyTimes": [
+          "09:00",
+          "14:00",
+          "19:00"
+        ],
+        "masterPrompt": "Escribe contenido original, claro y util para mi audiencia. No inventes datos.",
+        "language": "en",
+        "ai": {
+          "model": "gpt-4o-mini",
+          "useGlobalChain": true,
+          "provider": "openai",
+          "baseUrl": "https://api.openai.com/v1",
+          "apiKey": "",
+          "fallbackEnabled": true,
+          "fallbackProvider": "gemini",
+          "fallbackModel": "gemini-3.6-flash",
+          "fallbackApiKey": ""
+        },
+        "x": {
+          "username": "",
+          "accessToken": "",
+          "bearerToken": ""
+        }
+      },
+      "references": [],
+      "queue": [
+        {
+          "id": "x-1789748494530-0",
+          "text": "Llevaba meses evitando meter IA en mi SaaS porque pensaba que era hype.\nHasta que un día lo añadí a un flujo manual que me robaba 2 horas.\nAhora lo hace en 30 segundos.\nLa idea no es usar IA por moda, es buscar ese punto donde el tiempo que recuperas vale más que el coste.",
+          "scheduledFor": "2026-09-19T07:00:00.000Z",
+          "status": "simulated",
+          "attempts": 1,
+          "createdAt": "2026-09-18T16:21:34.530Z",
+          "source": "ai",
+          "publishedAt": "2026-09-19T07:00:00.023Z"
+        },
+        {
+          "id": "x-1789748494928-2",
+          "text": "Llevaba meses evitando meter IA en mi SaaS porque pensaba que era hype.\nHasta que un día lo añadí a un flujo manual que me robaba 2 horas.\nAhora lo hace en 30 segundos.\nLa idea no es usar IA por moda, es buscar ese punto donde el tiempo que recuperas vale más que el coste.",
+          "scheduledFor": "2026-09-18T17:00:00.000Z",
+          "status": "simulated",
+          "attempts": 1,
+          "createdAt": "2026-09-18T16:21:34.928Z",
+          "source": "ai",
+          "publishedAt": "2026-09-18T17:06:00.103Z"
+        }
+      ],
+      "logs": [
+        {
+          "at": "2026-09-19T15:31:43.936Z",
+          "message": "Eliminados 0 posts pendientes de X",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-19T15:31:41.631Z",
+          "message": "Eliminados 1 posts pendientes de X",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-19T07:00:00.023Z",
+          "message": "Simulado: Llevaba meses evitando meter IA en mi SaaS porque pensaba qu",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T17:06:00.103Z",
+          "message": "Simulado: Llevaba meses evitando meter IA en mi SaaS porque pensaba qu",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T16:22:13.940Z",
+          "message": "Ya hay 3 posts programados; no se generan duplicados",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T16:21:51.803Z",
+          "message": "Ya hay 3 posts programados; no se generan duplicados",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T16:21:34.928Z",
+          "message": "Generados 3 posts para Amo dominante",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T16:21:34.928Z",
+          "message": "Se pidio gpt-4o-mini pero respondio minimax/minimax-m3:free",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T16:21:34.734Z",
+          "message": "Se pidio gpt-4o-mini pero respondio minimax/minimax-m3:free",
+          "level": "info"
+        },
+        {
+          "at": "2026-09-18T16:21:34.525Z",
+          "message": "Se pidio gpt-4o-mini pero respondio minimax/minimax-m3:free",
+          "level": "info"
+        }
+      ],
+      "lastProvider": "xkiro/minimax/minimax-m3:free",
+      "languageMigrated": true
+    },
+    "default": {
+      "config": {
+        "enabled": false,
+        "postsPerDay": 3,
+        "postingMode": "simulation",
+        "accountTier": "free",
+        "contentMode": "ai",
+        "searchTopic": "",
+        "referenceHandle": "",
+        "dailyTimes": [
+          "09:00",
+          "14:00",
+          "19:00"
+        ],
+        "masterPrompt": "Escribe contenido original, claro y util para mi audiencia. No inventes datos.",
+        "language": "en",
+        "ai": {
+          "model": "gpt-4o-mini",
+          "useGlobalChain": true,
+          "provider": "openai",
+          "baseUrl": "https://api.openai.com/v1",
+          "apiKey": "",
+          "fallbackEnabled": true,
+          "fallbackProvider": "gemini",
+          "fallbackModel": "gemini-3.6-flash",
+          "fallbackApiKey": ""
+        },
+        "x": {
+          "username": "",
+          "accessToken": "",
+          "bearerToken": ""
+        }
+      },
+      "references": [],
+      "queue": [],
+      "logs": [],
+      "languageMigrated": true
+    }
+  }
+}

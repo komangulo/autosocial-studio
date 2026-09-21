@@ -29,6 +29,77 @@ let tempMailSetupState = {
   completedAt: null,
 };
 
+/**
+ * // MARKER: TIKTOK-PROFILE-RELEASE-v1
+ * Abre el perfil persistente de la cuenta esperando a que Chrome lo libere.
+ * Windows no suelta el --user-data-dir de inmediato tras cerrarse: si se lanza
+ * otro proceso sobre el mismo perfil, falla con exitCode=21. Aqui limpiamos
+ * candados huerfanos y reintentamos; si sigue ocupado de verdad, abortamos con
+ * un mensaje claro en vez de dejar caer todo el lote.
+ */
+async function openContextWithRetry(accountId, maxMs = 30000) {
+  const fsSync = require("fs");
+  const profileDir = await getPlatformProfileDir("tiktok", accountId);
+  await fs.mkdir(profileDir, { recursive: true });
+
+  const options = {
+    headless: config.headless,
+    viewport: { width: 1400, height: 1000 },
+    locale: config.browserLocale,
+    timezoneId: config.timezone,
+    args: ["--disable-blink-features=AutomationControlled"],
+  };
+
+  const tryLaunch = async (opts) => chromium.launchPersistentContext(profileDir, opts);
+
+  const deadline = Date.now() + maxMs;
+  let announced = false;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    for (const lock of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+      try {
+        fsSync.rmSync(path.join(profileDir, lock), { force: true });
+      } catch {
+        // En Windows el candado puede estar en uso: no es fatal, lo ignora.
+      }
+    }
+    try {
+      return await tryLaunch(options);
+    } catch (error) {
+      lastError = error;
+      // Un navegador del sistema puede salvar el caso de Chromium no instalado.
+      const candidates = process.platform === "win32"
+        ? [
+            path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+            path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+            path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+          ]
+        : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium"];
+      const chrome = candidates.find((c) => c && fsSync.existsSync(c));
+      if (chrome) {
+        try {
+          return await tryLaunch({ ...options, executablePath: chrome });
+        } catch (error2) {
+          lastError = error2;
+        }
+      }
+      if (!announced) {
+        console.log("El perfil de TikTok esta ocupado; esperando a que Chrome lo libere...");
+        announced = true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+
+  throw new Error(
+    "No se pudo abrir el perfil de TikTok: sigue en uso por otro proceso. " +
+    "Cierra TODAS las ventanas de Chrome (taskkill /F /IM chrome.exe /T) " +
+    "y vuelve a lanzar la subida. Detalle: " +
+    (lastError ? lastError.message : "desconocido")
+  );
+}
+
 async function openPersistentContext(accountId) {
   const profileDir = await getPlatformProfileDir("tiktok", accountId);
   await fs.mkdir(profileDir, { recursive: true });
@@ -69,19 +140,94 @@ async function gotoUploadPage(page) {
 }
 
 async function setVideoFile(page, videoPath) {
-  const candidates = [
-    page.locator('input[type="file"][accept*="video" i]').first(),
-    page.locator('input[type="file"][accept*=".mp4" i]').first(),
-    page.locator('input[type="file"]').first(),
-  ];
-  for (const fileInput of candidates) {
-    if (await fileInput.count() === 0) continue;
-    await fileInput.waitFor({ state: "attached", timeout: 120000 });
-    await fileInput.setInputFiles(videoPath);
-    console.log(`TikTok upload file selected: ${path.resolve(videoPath)}`);
-    return;
+  // MARKER: TIKTOK-UPLOAD-ROBUST-v1
+  const absolute = path.resolve(videoPath);
+  const deadline = Date.now() + 120000;
+
+  const isLoginWall = async () => {
+    try {
+      const url = page.url();
+      return /\/login|\/signup|accounts\.tiktok|tiktok\.com\/login/i.test(url);
+    } catch { return false; }
+  };
+
+  const findInput = async () => {
+    const selectors = [
+      'input[type="file"][accept*="video" i]',
+      'input[type="file"][accept*=".mp4" i]',
+      'input[type="file"][accept*="mp4" i]',
+      'input[type="file"]',
+    ];
+    // Busca en la pagina principal y tambien dentro de iframes (TikTok Studio
+    // puede montar el cargador en un frame aparte).
+    const scopes = [page];
+    for (const frame of page.frames ? page.frames() : []) {
+      if (frame && frame !== page.mainFrame?.()) scopes.push(frame);
+    }
+    for (const scope of scopes) {
+      for (const selector of selectors) {
+        const locator = scope.locator(selector).first();
+        if (await locator.count().catch(() => 0) > 0) return locator;
+      }
+    }
+    return null;
+  };
+
+  let reloaded = false;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    if (await isLoginWall()) {
+      throw new Error(
+        "La sesion de TikTok no esta activa (TikTok pidio iniciar sesion). " +
+        "Abre el login de TikTok para esta cuenta, inicia sesion y vuelve a intentarlo."
+      );
+    }
+
+    const input = await findInput();
+    if (input) {
+      try {
+        await input.waitFor({ state: "attached", timeout: 5000 });
+        await input.setInputFiles(absolute);
+        console.log(`TikTok upload file selected: ${absolute}`);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    try {
+      const [chooser] = await Promise.all([
+        page.waitForEvent("filechooser", { timeout: 2500 }),
+        (async () => {
+          const trigger = page
+            .getByRole("button", { name: /select|upload|choose|subir|seleccionar|elegir/i })
+            .first();
+          if (await trigger.count().catch(() => 0) > 0) {
+            await trigger.click({ timeout: 2000 }).catch(() => {});
+          }
+        })(),
+      ]);
+      await chooser.setFiles(absolute);
+      console.log(`TikTok upload file selected via file chooser: ${absolute}`);
+      return;
+    } catch {
+      // Sin dialogo; seguimos esperando.
+    }
+
+    if (!reloaded && Date.now() > deadline - 95000) {
+      reloaded = true;
+      console.log("TikTok: no aparecio el input de video; recargando la pagina una vez...");
+      await gotoUploadPage(page).catch(() => {});
+    }
+
+    await page.waitForTimeout(1000);
   }
-  throw new Error("No se encontró el campo de subida de vídeo de TikTok.");
+
+  const hint = lastError ? ` Ultimo detalle: ${lastError.message}` : "";
+  throw new Error(
+    "No se encontro el campo de subida de video de TikTok tras esperar 2 minutos." + hint +
+    " Comprueba que la sesion de TikTok esta iniciada y que la pagina de subida carga bien."
+  );
 }
 
 /** Upload and confirm a custom TikTok cover when Auto Clone provided one. */
@@ -199,8 +345,12 @@ async function setCaption(page, caption) {
  * matching option. `location` is a single string such as "Madrid, Spain".
  */
 async function setLocation(page, location) {
-  const query = String(location || "").trim();
-  if (!query) return false;
+  const rawQuery = String(location || "").trim();
+  if (!rawQuery) return false;
+  // TikTok a veces sugiere "MadridMadrid, Spain" al buscar "Madrid, Spain":
+  // se teclea la ciudad y su propio nombre vuelve duplicado. Enviar solo la
+  // ciudad evita la duplicacion; el pais lo resuelve la propia sugerencia.
+  const query = rawQuery.includes(",") ? rawQuery.split(",")[0].trim() : rawQuery;
 
   // Open the location search box.
   const searchCandidates = [
@@ -999,6 +1149,176 @@ async function clickFirstVisibleButton(page, nameRegex, timeout = 3000) {
   }
 }
 
+/**
+ * // MARKER: TIKTOK-RESTRICTED-MODAL-v1
+ * Cierra el modal "Content may be restricted" (la X es un div con SVG, sin
+ * texto ni aria-label, por eso el codigo anterior no la encontraba).
+ */
+/**
+ * // MARKER: TIKTOK-RESTRICTED-MODAL-v3
+ * Cierra el modal "Content may be restricted" / "El contenido puede estar
+ * restringido", que aparece tras pulsar Publicar y bloquea el boton.
+ *
+ * v3: detecta el dialogo por su TEXTO (antes exigia encontrar el boton de
+ * cierre, y si TikTok lo pintaba distinto la funcion decia "no hay popup" y el
+ * video nunca se publicaba). Cierra con varias estrategias y VERIFICA que se
+ * cerro. Devuelve true solo si el popup ya no esta.
+ */
+/**
+ * // MARKER: TIKTOK-RESTRICTED-MODAL-v3
+ * Espera a que el boton Publicar/Programar vuelva a estar visible y habilitado
+ * tras cerrar el popup: TikTok lo deja tapado o desactivado unos instantes y un
+ * click inmediato no hace nada.
+ */
+async function waitForPublishClickable(page, maxMs = 8000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    const ready = await page
+      .evaluate(() => {
+        const pattern = /^(post|publicar|publish|schedule|programar)$/i;
+        const buttons = [
+          ...document.querySelectorAll("button, [role='button'], [class*='Btn']"),
+        ];
+        for (const b of buttons) {
+          const label = (b.innerText || b.textContent || "").trim();
+          if (!pattern.test(label)) continue;
+          const box = b.getBoundingClientRect();
+          if (box.width <= 0 || box.height <= 0) continue;
+          if (b.disabled || b.getAttribute("aria-disabled") === "true") continue;
+          return true;
+        }
+        return false;
+      })
+      .catch(() => false);
+    if (ready) return true;
+    await page.waitForTimeout(400);
+  }
+  return false;
+}
+
+async function dismissRestrictedContentModal(page) {
+  const findOpenModal = () =>
+    page.evaluate(() => {
+      const titlePattern = /content may be restricted|el contenido puede estar restringido|puede estar restringido|contenido restringido/i;
+      const reasons = [
+        /unoriginal|low-quality|qr code|poco original|baja calidad|codigo qr/i,
+        /violation reason|motivo de la infraccion/i,
+      ];
+      const visible = (el) =>
+        el && el.offsetParent !== null && el.getBoundingClientRect().width > 0;
+      const candidates = [
+        ...document.querySelectorAll(
+          '[role="dialog"], [aria-modal="true"], [class*="modal" i], [class*="Modal" i]'
+        ),
+      ].filter(visible);
+
+      for (const d of candidates) {
+        const body = (d.innerText || "").trim();
+        if (!body) continue;
+        // El modal de subida NO es el de restriccion: tiene los controles de
+        // programacion.
+        if (/when to post|schedule|subir|postSchedule/i.test(body)) continue;
+        if (!(titlePattern.test(body) || reasons.some((p) => p.test(body)))) continue;
+        return { text: body.slice(0, 120) };
+      }
+      return null;
+    });
+
+  let closedAny = false;
+  for (let pass = 0; pass < 5; pass += 1) {
+    let open = null;
+    try {
+      open = await findOpenModal();
+    } catch {
+      open = null;
+    }
+    if (!open) break;
+
+    let clicked = false;
+
+    // 1) El boton real: .common-modal-close (con su SVG).
+    const closeByClass = page
+      .locator(".common-modal-close, [class*='common-modal-close']")
+      .first();
+    if ((await closeByClass.count().catch(() => 0)) > 0) {
+      await closeByClass.click({ timeout: 1500, force: true }).catch(() => {});
+      clicked = true;
+    }
+
+    // 2) El icono interno.
+    if (!clicked) {
+      const icon = page
+        .locator(".common-modal-close-icon, [class*='common-modal-close-icon']")
+        .first();
+      if ((await icon.count().catch(() => 0)) > 0) {
+        await icon.click({ timeout: 1500, force: true }).catch(() => {});
+        clicked = true;
+      }
+    }
+
+    // 3) Cualquier aria-label/close del dialogo.
+    if (!clicked) {
+      const ariaClose = page
+        .locator("[aria-label*='close' i], [aria-label*='cerrar' i], [class*='close' i]")
+        .first();
+      if ((await ariaClose.count().catch(() => 0)) > 0) {
+        await ariaClose.click({ timeout: 1500, force: true }).catch(() => {});
+        clicked = true;
+      }
+    }
+
+    // 4) Escape (cierra modales nativos).
+    if (!clicked) {
+      await page.keyboard.press("Escape").catch(() => {});
+      clicked = true;
+    }
+
+    // 5) JS directo sobre el DOM (ultimo recurso).
+    if (!clicked) {
+      const didClick = await page
+        .evaluate(() => {
+          const nodes = [
+            ...document.querySelectorAll(
+              ".common-modal-close, [class*='common-modal-close'], [class*='close' i]"
+            ),
+          ];
+          for (const node of nodes) {
+            if (node && typeof node.click === "function") {
+              node.click();
+              return true;
+            }
+          }
+          return false;
+        })
+        .catch(() => false);
+      clicked = Boolean(didClick);
+    }
+
+    if (!clicked) break;
+    closedAny = true;
+    await page.waitForTimeout(500);
+  }
+
+  // Verificar: si el modal sigue ahi, la X no funciono.
+  let stillOpen = null;
+  try {
+    stillOpen = await findOpenModal();
+  } catch {
+    stillOpen = null;
+  }
+  if (closedAny && stillOpen) {
+    console.log(
+      "TikTok: el popup restringido sigue abierto tras intentar cerrarlo (la X no respondio)."
+    );
+    return false;
+  }
+
+  if (closedAny) {
+    console.log("TikTok: cerrado el popup de contenido restringido; reintentando publicar.");
+  }
+  return closedAny;
+}
+
 async function dismissInterferingOverlays(page) {
   // Only dismiss *secondary* hint/consent dialogs. Never click a button whose
   // label means Cancel/Exit/Continue: on the upload modal those are the dialog's
@@ -1279,6 +1599,46 @@ function formatScheduleTime(date, timezone) {
  * exact date and time. TikTok's Web Studio exposes a radio group
  * (When to post: Now / Schedule) plus two select-like dropdowns.
  */
+/**
+ * // MARKER: TIKTOK-KEEP-BROWSER-ON-SCHEDULE-FAIL-v1
+ * Comprueba que el radio "Schedule" de "When to post" esta activo. Si esta en
+ * "Now", lo activa. Evita llegar a programar con el formulario en "Now"
+ * (que es lo que hacia que no se pusiera la fecha/hora).
+ */
+async function ensureScheduleRadioOn(page) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const state = await page.evaluate(() => {
+      const radio = document.querySelector(
+        "input[name='postSchedule'][value='schedule'], input[type='radio'][value='schedule']"
+      );
+      if (!radio) return "missing";
+      const on = radio.checked || radio.getAttribute("aria-checked") === "true";
+      return on ? "on" : "off";
+    }).catch(() => "missing");
+
+    if (state === "on") return true;
+    if (state === "missing") {
+      await page.waitForTimeout(700);
+      continue;
+    }
+    // Esta en "Now": activar Schedule.
+    await page.evaluate(() => {
+      const radio = document.querySelector(
+        "input[name='postSchedule'][value='schedule'], input[type='radio'][value='schedule']"
+      );
+      if (!radio) return;
+      radio.click();
+      if (!(radio.checked || radio.getAttribute("aria-checked") === "true")) {
+        const wrap = radio.closest("label, [role='radio']") || radio.parentElement || radio;
+        wrap.click();
+      }
+    }).catch(() => {});
+    await page.waitForTimeout(900);
+  }
+  console.log("Aviso: no se pudo confirmar que el radio Schedule este activo; se intentara programar igual.");
+  return false;
+}
+
 async function enableScheduleMode(page) {
   await dismissInterferingOverlays(page);
 
@@ -1947,6 +2307,72 @@ async function describeScheduleState(page) {
   }).catch((error) => ({ error: error.message }));
 }
 
+/**
+ * // MARKER: TIKTOK-WAIT-PROCESSING-v1
+ * Espera a que TikTok termine de procesar el video. Mientras procesa, muestra
+ * "Checking in progress..." y bloquea el selector de programacion.
+ * Devuelve true si termino; false si se agoto el tiempo (no lanza).
+ */
+async function waitForVideoProcessing(page, maxMs = 600000) {
+  // MARKER: TIKTOK-WAIT-READY-BY-STATE-v2
+  // Espera por ESTADO real del editor, no por texto suelto ("uploading" da
+  // falsos positivos y bloquea 20 min). Listo cuando:
+  //   - aparece "Uploaded" (verde) en la ficha del video, o
+  //   - ya no hay barra/aviso de subida activo y el caption existe.
+  const isReady = async () => {
+    try {
+      return await page.evaluate(() => {
+        const visible = (el) => el && el.offsetParent !== null;
+        const txt = (document.body.innerText || "");
+        const badTexts = [
+          /checking in progress/i,
+          /this will take about/i,
+          /longer videos may take/i,
+          /may take more time/i,
+          /comprobando/i,
+          /tardar[a]? aproximadamente/i,
+        ];
+        // 1. Si hay aviso explicito de procesado, NO esta listo.
+        const leaves = [...document.querySelectorAll("span, div, p, [role='alert']")]
+          .filter((el) => visible(el) && el.children.length === 0);
+        for (const el of leaves) {
+          const t = (el.textContent || "").trim();
+          if (!t || t.length > 200) continue;
+          if (badTexts.some((p) => p.test(t))) return false;
+        }
+        // 2. Senal positiva: "Uploaded" visible y sin "Uploading".
+        const uploaded = /\buploaded\b/i.test(txt);
+        const uploading = /\buploading\b|subiendo\.\.\./i.test(txt);
+        if (uploaded && !uploading) return true;
+        // 3. Si existe el input de caption y no hay aviso, damos por listo.
+        const caption =
+          document.querySelector('div[contenteditable="true"]') ||
+          document.querySelector('[data-e2e="caption-input"]');
+        if (caption && !uploading) return true;
+        return false;
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  const deadline = Date.now() + Math.max(60000, Number(maxMs) || 600000);
+  let waited = 0;
+  while (Date.now() < deadline) {
+    if (await isReady()) {
+      if (waited > 0) console.log("TikTok: video listo (Uploaded).");
+      return true;
+    }
+    await page.waitForTimeout(3000);
+    waited += 3000;
+    if (waited % 60000 === 0) {
+      console.log(`  ...TikTok sigue procesando (${Math.round(waited / 1000)}s)`);
+    }
+  }
+  console.log("TikTok: no se confirmo el fin del procesado; se intenta programar igual.");
+  return false;
+}
+
 async function setNativeSchedule(page, scheduledAt, timezone) {
   const date = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
   if (Number.isNaN(date.getTime())) {
@@ -2012,6 +2438,13 @@ async function setNativeSchedule(page, scheduledAt, timezone) {
     if (!lastError) {
       return { timeValue, dateValue };
     }
+    // // MARKER: TIKTOK-SCHEDULE-PROCESSING-v1: la fecha/hora ya cuadraban. Si lo unico que hay es el aviso de
+    // que TikTok esta procesando el video, NO es un error de programacion:
+    // dar por bueno y continuar (antes abortaba aqui y "no terminaba de subir").
+    if (/checking in progress|this will take about|longer videos may take|may take more time|processing|comprobando/i.test(lastError)) {
+      console.log(`TikTok esta procesando el video (${lastError}); se da por buena la programacion.`);
+      return { timeValue, dateValue };
+    }
 
     if (/15\s*minut|at least/i.test(lastError)) {
       date.setMinutes(date.getMinutes() + 20);
@@ -2048,13 +2481,27 @@ async function readScheduleInputValues(page) {
 
 /** Read an inline validation error shown near the schedule controls. */
 async function readTikTokScheduleError(page) {
+  // MARKER: TIKTOK-SCHEDULE-PROCESSING-v1
   return page.evaluate(() => {
+    // Avisos NORMALES de TikTok mientras procesa el video. NO son errores de la
+    // fecha/hora y no deben abortar la programacion.
+    const processingNoise = [
+      /checking in progress/i,
+      /this will take about/i,
+      /longer videos may take/i,
+      /may take more time/i,
+      /processing/i,
+      /comprobando/i,
+      /tardar[a]? aproximadamente/i,
+    ];
     const patterns = [/at least/i, /15\s*minut/i, /minut/i, /invalid/i, /must be/i, /no puede/i, /al menos/i];
     const candidates = [...document.querySelectorAll("[class*='error' i], [class*='Error'], [role='alert'], [class*='helper' i], span, div, p")]
       .filter((element) => element.offsetParent !== null && element.children.length === 0);
     for (const element of candidates) {
       const text = (element.textContent || "").trim();
       if (!text || text.length > 120) continue;
+      // Ignora los avisos de procesado antes de comprobar patrones de error.
+      if (processingNoise.some((pattern) => pattern.test(text))) continue;
       if (patterns.some((pattern) => pattern.test(text))) return text;
     }
     return "";
@@ -2196,6 +2643,48 @@ async function waitForPublishConfirmation(page, responseTracker) {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       await dismissInterferingOverlays(page);
 
+      // MARKER: TIKTOK-RESTRICTED-MODAL-v3
+      // El popup "Content may be restricted" aparece al pulsar Publicar y
+      // tapa el boton. Hay que cerrarlo Y volver a pulsar Publicar, siempre
+      // (no solo mientras queden reintentos). Tras cerrarlo, el boton tarda
+      // unos instantes en volver a estar clickable.
+      if (await dismissRestrictedContentModal(page)) {
+        await page.waitForTimeout(700);
+        const publishReady = await waitForPublishClickable(page, 8000);
+        const reclicked = await tryClickPublishButton(page);
+        console.log(
+          reclicked
+            ? "Popup restringido cerrado y Publicar pulsado de nuevo."
+            : publishReady
+              ? "Popup restringido cerrado; el boton esta listo pero no consegui pulsarlo."
+              : "Popup restringido cerrado, pero el boton Publicar no volvio a estar disponible."
+        );
+        if (reclicked) {
+          primaryRetryCount = 0;
+          await page.waitForTimeout(1500);
+          continue;
+        }
+      }
+
+      // MARKER: TIKTOK-RESTRICTED-MODAL-v2
+      // El popup "Content may be restricted" aparece al pulsar Publicar y
+      // tapa el boton. Hay que cerrarlo Y volver a pulsar Publicar, siempre
+      // (no solo mientras queden reintentos).
+      if (await dismissRestrictedContentModal(page)) {
+        await page.waitForTimeout(700);
+        const reclicked = await tryClickPublishButton(page);
+        console.log(
+          reclicked
+            ? "Popup restringido cerrado y Publicar pulsado de nuevo."
+            : "Popup restringido cerrado, pero no encontre el boton Publicar."
+        );
+        if (reclicked) {
+          primaryRetryCount = 0;
+          await page.waitForTimeout(1500);
+          continue;
+        }
+      }
+
       const bodyText = await page
         .locator("body")
         .innerText()
@@ -2239,6 +2728,7 @@ async function waitForPublishConfirmation(page, responseTracker) {
         page.url().includes("/upload")
       ) {
         console.log("No publish confirmation yet; retrying the primary TikTok Post button.");
+        // // MARKER: TIKTOK-RESTRICTED-MODAL-v1: cerrar el modal de contenido restringido antes de reintentar.
         const retried = await tryClickPublishButton(page);
         if (retried) {
           primaryRetryCount += 1;
@@ -2269,6 +2759,23 @@ async function waitForPublishConfirmation(page, responseTracker) {
 }
 
 async function waitForUploadReady(page) {
+  const deadline = Date.now() + 180000;
+  const editorSelectors = [
+    'div[contenteditable="true"]',
+    'textarea[placeholder*="caption" i]',
+    '[data-e2e="video-upload"]',
+    '[data-e2e="caption-input"]',
+  ];
+  while (Date.now() < deadline) {
+    for (const selector of editorSelectors) {
+      const locator = page.locator(selector).first();
+      if (await locator.count().catch(() => 0) > 0) {
+        await page.waitForTimeout(1500);
+        return;
+      }
+    }
+    await page.waitForTimeout(1000);
+  }
   await page.waitForTimeout(Math.max(config.postDelayMs, 5000));
 }
 
@@ -2515,13 +3022,22 @@ async function startLoginSessionCli() {
   });
 }
 
-async function uploadVideo({ videoPath, coverPath, caption, source, accountId, onPhase, scheduledAt, scheduleTimezone, location, aiGenerated }) {
+async function uploadVideo({ videoPath, coverPath, caption, source, accountId, onPhase, scheduledAt, scheduleTimezone, location, aiGenerated, page: sharedPage, context: sharedContext, reuseBrowser}) {
   const absoluteVideoPath = path.resolve(videoPath);
-  const context = await openPersistentContext(accountId);
-  const page = context.pages()[0] || (await context.newPage());
+  // MARKER: TIKTOK-REUSE-BROWSER-v1
+  // Con reuseBrowser la pagina y el contexto vienen del lote (un solo
+  // navegador para todos los videos) y NO se cierran aqui.
+  const ownsBrowser = !(reuseBrowser && sharedPage && sharedContext);
+  const context = ownsBrowser
+    ? await openContextWithRetry(accountId)
+    : sharedContext;
+  const page = ownsBrowser
+    ? context.pages()[0] || (await context.newPage())
+    : sharedPage;
   let closeHoldMs = 0;
   let publishResponseTracker = null;
   const scheduleMode = Boolean(scheduledAt);
+  let lastScheduleError = null; // MARKER: TIKTOK-KEEP-BROWSER-ON-SCHEDULE-FAIL-v1
 
   try {
     await onPhase?.("browser-started");
@@ -2549,8 +3065,31 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
     }
 
     if (scheduleMode) {
+      // MARKER: TIKTOK-KEEP-BROWSER-ON-SCHEDULE-FAIL-v1
+      // Espera por estado (no por texto) antes de tocar la programacion.
+      await waitForVideoProcessing(page);
+      // Asegura que el radio "Schedule" quedo activo antes de programar.
+      await ensureScheduleRadioOn(page);
       await onPhase?.("schedule-setting");
-      const { timeValue, dateValue } = await setNativeSchedule(page, scheduledAt, scheduleTimezone);
+      let scheduleResult = null;
+      let scheduleError = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          scheduleResult = await setNativeSchedule(page, scheduledAt, scheduleTimezone);
+          break;
+        } catch (error) {
+          scheduleError = error;
+          // Si sigue procesando o el selector no responde, espera y reintenta.
+          console.log(`Programacion intento ${attempt + 1} fallido: ${error.message}`);
+          await waitForVideoProcessing(page, 120000).catch(() => {});
+          await page.waitForTimeout(5000);
+        }
+      }
+      if (!scheduleResult) {
+        lastScheduleError = scheduleError || new Error("No se pudo programar la fecha/hora.");
+        throw lastScheduleError;
+      }
+      const { timeValue, dateValue } = scheduleResult;
       console.log(`TikTok schedule set to ${dateValue} ${timeValue}.`);
     }
 
@@ -2590,8 +3129,18 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
     if (publishResponseTracker) {
       publishResponseTracker.dispose();
     }
-    await holdBrowserBeforeClose(page, closeHoldMs, "post-finalization");
-    await context.close();
+    // MARKER: TIKTOK-KEEP-BROWSER-ON-SCHEDULE-FAIL-v1
+    // Si fallo la PROGRAMACION, no cerrar: deja la ventana abierta para ver
+    // el motivo y guarda la captura. En publicacion normal si se cierra.
+    const failedSchedule = Boolean(lastScheduleError);
+    if (ownsBrowser && !(scheduleMode && failedSchedule && config.keepBrowserOnScheduleFail !== false)) {
+      await holdBrowserBeforeClose(page, closeHoldMs, "post-finalization");
+      await context.close();
+    } else if (scheduleMode && failedSchedule) {
+      console.log("Programacion fallida: se deja el navegador ABIERTO para revisarlo.");
+    } else if (!ownsBrowser) {
+      // Navegador compartido: nunca lo cierra el uploader.
+    }
   }
 }
 
@@ -2604,7 +3153,10 @@ module.exports = {
   getLoginSessionStatus,
   closeLoginSession,
   uploadVideo,
+  openContextWithRetry,
   _private: {
+    ensureScheduleRadioOn,
+    dismissRestrictedContentModal,
     getPublishCandidateScore,
     isLikelyPublishCandidateInfo,
     formatScheduleDate,

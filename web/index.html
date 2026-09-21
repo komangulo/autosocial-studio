@@ -71,7 +71,12 @@
           <i class="ph ph-sparkle"></i>
           <span>Google Flow</span>
         </button>
-        <button class="nav-item" data-view="x-autopilot">
+                <!-- MARKER: ACCTAN-NAV-v1 -->
+        <button class="nav-item" data-view="account-analysis">
+          <i class="ph ph-magnifying-glass-chart"></i>
+          <span>Analisis de cuenta</span>
+        </button>
+<button class="nav-item" data-view="x-autopilot">
           <i class="ph ph-x-logo"></i>
           <span>X Autopilot</span>
         </button>
@@ -109,7 +114,12 @@
           <i class="ph ph-users"></i>
           <span>Accounts</span>
         </button>
-        <button class="nav-item" data-view="settings">
+                <!-- MARKER: AICFG-NAV-v1 -->
+        <button class="nav-item" data-view="ai-config">
+          <i class="ph ph-brain"></i>
+          <span>Configuracion IA</span>
+        </button>
+<button class="nav-item" data-view="settings">
           <i class="ph ph-gear"></i>
           <span>Settings</span>
         </button>
@@ -326,6 +336,14 @@
             <button id="autocloneSaveDeepSeekKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
           </div>
           <p class="helios-hint" id="autocloneDeepSeekStatus"></p>
+
+          <div class="card-title" style="margin-top:18px;">API key de xKiro (rotacion gratuita)</div>
+          <p class="form-hint">Rota entre 4 modelos gratis de xKiro antes de gastar cuota de Gemini. Pega la clave de https://api.xkiro.com. Se guarda localmente.</p>
+          <div class="helios-key-row">
+            <input id="autocloneXKiroKey" class="control-input" type="password" placeholder="sk-..." />
+            <button id="autocloneSaveXKiroKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
+          </div>
+          <p class="helios-hint" id="autocloneXKiroStatus"></p> <!-- XKC[html] -->
         </div> // DS[ui-panel]
 
         <div class="autoclone-main">
@@ -334,6 +352,15 @@
             <div class="autoclone-bar"><div id="autocloneBarFill" class="autoclone-bar-fill"></div></div>
             <p id="autocloneStage" class="autoclone-stage">Listo. Escribe un usuario y pulsa «Clonar ahora».</p>
           </div>
+          <div class="card autoclone-model-card">
+            <div class="card-title">Modelo en uso ahora</div>
+            <div id="autocloneModeloActivo" class="autoclone-modelo">
+              <span class="autoclone-modelo-prov">—</span>
+              <span class="autoclone-modelo-id">Sin actividad</span>
+            </div>
+            <p id="autocloneModeloDetalle" class="helios-hint">Cuando empiece el trabajo, aqui vera que modelo esta leyendo los fotogramas en ese instante.</p>
+            <div id="autocloneModeloHistorial" class="autoclone-modelo-hist"></div>
+          </div> <!-- XKI[indicador][html] -->
           <div class="card autoclone-videos-card">
             <div class="card-title">Vídeos procesados</div>
             <div id="autocloneVideos" class="autoclone-videos">
@@ -1079,6 +1106,257 @@
         </div>
       </section>
 
+
+      <!-- MARKER: AICFG-UI-v1 -->
+      <section id="view-ai-config" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Configuracion de IA</h2>
+            <span class="view-subtitle">Guarda aqui tus claves una sola vez. Toda la app las usa en este orden automatico: xKiro (gratis) &rarr; Gemini gratis &rarr; DeepSeek (pago) &rarr; Gemini pago &rarr; OpenRouter.</span>
+          </div>
+          <span id="aiChainBadge" class="status-badge">Sin proveedores</span>
+        </header>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Como funciona</div>
+          <p class="form-hint">La app intenta primero xKiro con sus modelos gratuitos. Si falla o se agota, pasa solo al siguiente proveedor. No tienes que hacer nada mas.</p>
+          <div id="aiChainList" class="ai-chain-list"></div>
+          <label class="toggle-line" style="margin-top:14px;">
+            <input id="aiChainEnabled" type="checkbox" checked>
+            <span>Usar la cadena automatica en toda la app</span>
+          </label>
+        </div>
+
+        <div class="settings-grid" id="aiProviderGrid"></div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-title">Probar una clave</div>
+          <p class="form-hint">Hace una llamada real y corta para confirmar que la clave funciona.</p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <select id="aiTestProvider" class="control-input" style="max-width:240px;"></select>
+            <button id="aiTestBtn" class="control-btn-small primary"><i class="ph ph-plug"></i> Probar</button>
+            <span id="aiTestResult" class="form-hint"></span>
+          </div>
+          <p class="form-hint" id="aiLastTest" style="margin-top:8px;"></p>
+        </div>
+      </section>
+
+
+      
+
+
+      
+
+
+      
+
+
+      <!-- MARKER: ACCTAN-UI-v1 -->
+      <section id="view-account-analysis" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Analisis de cuenta</h2>
+            <span class="view-subtitle">Mete cualquier @ de X y la herramienta estudia su forma de comunicar: temas, tono, sentimiento, estructura y ritmo. Guarda varias cuentas y cambia entre ellas cuando quieras.</span>
+          </div>
+          <span id="acctAnalysisBadge" class="status-badge">Sin analisis</span>
+        </header>
+
+        <div id="acctSessionBanner" class="tt-login-banner card" style="margin-bottom:16px;">
+          <div class="tt-login-row">
+            <span class="tt-login-icon"><i class="ph ph-x-logo"></i></span>
+            <div class="tt-login-text">
+              <strong id="acctSessionTitle">Sesion de X</strong>
+              <span id="acctSessionMessage">Necesitas iniciar sesion en X aqui mismo para poder leer los posts de una cuenta.</span>
+            </div>
+            <span id="acctSessionBadge" class="status-badge">Sin sesion</span>
+            <button id="acctLoginBtn" class="control-btn-small primary"><i class="ph ph-browser"></i> Iniciar sesion</button>
+            <button id="acctLoginSaveBtn" class="control-btn-small success"><i class="ph ph-floppy-disk"></i> Guardar sesion</button>
+            <button id="acctLoginCloseBtn" class="control-btn-small danger"><i class="ph ph-x"></i> Cerrar</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Analizar una cuenta</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+            <input id="acctHandle" class="control-input" style="max-width:260px; text-transform:none;" placeholder="@usuario (ej. levelsio)" />
+            <select id="acctMaxPosts" class="control-input" style="max-width:180px;">
+              <option value="50">50 publicaciones</option>
+              <option value="100">100 publicaciones</option>
+              <option value="150" selected>150 publicaciones</option>
+              <option value="200">200 publicaciones</option>
+              <option value="300">300 publicaciones</option>
+            </select>
+            <button id="acctStartBtn" class="control-btn-small primary"><i class="ph ph-play"></i> Analizar</button>
+            <button id="acctRefreshBtn" class="control-btn-small"><i class="ph ph-arrows-clockwise"></i> Actualizar</button>
+          </div>
+          <div id="acctProgressBox" style="display:none; margin-top:14px; padding:12px 14px; border-radius:10px; background:#101c2e; border:1px solid #1e3a63;">
+            <p id="acctProgress" style="font-size:13.5px; color:#9cc3ff; margin:0;"></p>
+          </div>
+        </div>
+
+        <div id="acctSessionWarning" class="card" style="display:none; margin-bottom:16px; border-color:#5c4413; background:#1a1408;">
+          <p style="font-size:13.5px; color:#ffd98a; margin:0;">
+            <b>Antes de analizar necesitas iniciar sesion en X.</b> Usa el boton <b>Iniciar sesion</b> de arriba, entra en tu cuenta en la ventana que se abre y pulsa <b>Guardar sesion</b>.
+          </p>
+        </div>
+
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-title">Cuentas analizadas</div>
+            <div id="acctProfileList" class="x-reference-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-title" id="acctDetailTitle">Detalle</div>
+            <div id="acctDetailBody"><p class="form-hint">Selecciona una cuenta de la lista para ver su analisis.</p></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-title">Manual de ADN</div>
+          <p class="form-hint">Este documento es el molde que usa la IA para escribir. Se guarda por cuenta.</p>
+          // MARKER: ACCTAN-REPORTS-v1
+          <div id="acctReportsBar" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0;">
+            <label class="form-hint" for="acctReportSelect" style="margin:0;">Informe guardado:</label>
+            <select id="acctReportSelect" class="control-input" style="max-width:340px;">
+              <option value="">— Usar el analisis mas reciente —</option>
+            </select>
+            <button id="acctReportLoad" class="control-btn-small primary"><i class="ph ph-folder-open"></i> Cargar informe</button>
+            <button id="acctReportDelete" class="control-btn-small danger"><i class="ph ph-trash"></i> Borrar informe</button>
+          </div>
+          <p id="acctReportsHint" class="form-hint">Cada analisis se guarda con la fecha y la hora. Elige uno anterior para no repetir el analisis.</p>
+          <pre id="acctManual" style="white-space:pre-wrap; font-size:12px; line-height:1.5; max-height:420px; overflow:auto; background:#0d1013; border:1px solid #242a33; border-radius:10px; padding:14px; margin-top:10px;">Selecciona una cuenta para ver su manual.</pre>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <button id="acctUseBtn" class="control-btn-small primary"><i class="ph ph-check"></i> Usar esta cuenta como referencia</button>
+            <button id="acctDeleteBtn" class="control-btn-small danger"><i class="ph ph-trash"></i> Borrar analisis</button>
+          </div>
+        </div>
+
+
+        <div class="card" id="radarCard" style="margin-top:16px;">
+          <!-- MARKER: ACCT-RADAR-UI-v1 -->
+          <div class="card-title"><i class="ph ph-broadcast"></i> Radar de noticias y afiliados</div>
+          <p class="form-hint">El radar escanea X con <b>la sesion con la que ya estas logueado</b> (no hace falta analizar ninguna cuenta) buscando las <b>palabras clave</b> que escribas abajo. Los posts que coincidan se reescriben con IA, sus links de tienda se cambian por <b>tu link de afiliado</b>, y se publican conservando las imagenes del original. Tope diario y sin repetir la misma noticia.</p>
+
+          <label style="display:flex; flex-direction:column; gap:4px; margin-top:12px;">
+            <span class="form-hint">Temas a escanear (uno por linea o separados por comas). Solo se publican posts que contengan alguna de estas palabras.</span>
+            <textarea id="radarKeywords" class="control-input" rows="4" style="width:100%; resize:vertical;" placeholder="One Piece&#10;TCG&#10;One Piece Card Game&#10;Pokemon TCG"></textarea>
+          </label>
+
+          <div class="card-title" style="margin-top:16px; font-size:14px;"><i class="ph ph-link"></i> Mis links de afiliado</div>
+          <p class="form-hint">Pega aqui tus IDs o links. Amazon: tu tag (ej. miweb-21) o el link corto. eBay: tu campaign ID o link. Target: tu afid o link.</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+              <span class="form-hint">Amazon</span>
+              <input id="radarAmazon" class="control-input" type="text" placeholder="miweb-21  o  https://amzn.to/xxxx" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+              <span class="form-hint">eBay</span>
+              <input id="radarEbay" class="control-input" type="text" placeholder="campaign id  o  https://ebay.us/xxxx" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+              <span class="form-hint">Target</span>
+              <input id="radarTarget" class="control-input" type="text" placeholder="afid  o  https://goto.target.com/xxxx" />
+            </label>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:14px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Maximo de posts al dia</span>
+              <input id="radarMax" class="control-input" type="number" min="1" max="100" value="20" style="max-width:170px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Revisar cada (min)</span>
+              <input id="radarEvery" class="control-input" type="number" min="15" max="1440" value="60" style="max-width:160px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Idioma</span>
+              <select id="radarLang" class="control-input" style="max-width:150px;">
+                <option value="en">Ingles</option>
+                <option value="es">Espanol</option>
+              </select>
+            </label>
+            <label style="display:flex; flex-direction:row; gap:8px; align-items:center; padding-bottom:8px;">
+              <input id="radarOnlyLinks" type="checkbox" />
+              <span class="form-hint">Solo publicar posts que ya lleven un link de tienda</span>
+            </label>
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:center;">
+            <button id="radarSave" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Guardar ajustes del radar</button>
+            <button id="radarScan" class="control-btn-small"><i class="ph ph-magnifying-glass"></i> Escanear sin publicar</button>
+            <button id="radarRun" class="control-btn-small success"><i class="ph ph-broadcast"></i> Escanear y publicar ahora</button>
+            <button id="radarStop" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Parar radar hoy</button>
+            <span id="radarBadge" class="status-badge">0 / 20 hoy</span>
+          </div>
+          <div id="radarBox" style="display:none; margin-top:12px; padding:12px 14px; border-radius:10px; background:#101c2e; border:1px solid #1e3a63;">
+            <p id="radarMsg" style="font-size:13.5px; color:#9cc3ff; margin:0;"></p>
+          </div>
+          <details style="margin-top:12px;" open>
+            <summary class="form-hint" style="cursor:pointer;">Ultimos posts publicados por el radar</summary>
+            <div id="radarHistory" style="margin-top:10px;"></div>
+          </details>
+        </div>
+
+        <div class="card" id="acctPubCard" style="margin-top:16px;">
+          <!-- MARKER: ACCT-PUB-UI-v1 -->
+          <div class="card-title"><i class="ph ph-calendar-check"></i> Publicacion diaria con este perfil</div>
+          <p class="form-hint">La IA escribira cada dia imitando el estilo de la cuenta seleccionada y publicara en <b>la cuenta de X con la que estas logueado</b>. Elige cuantos tuits y sobre que temas.</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:12px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Tuits diarios</span>
+              <input id="acctPubCount" class="control-input" type="number" min="1" max="20" value="3" style="max-width:110px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Primer tuit</span>
+              <input id="acctPubStart" class="control-input" type="time" value="09:00" style="max-width:130px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Minutos entre tuits</span>
+              <input id="acctPubSpread" class="control-input" type="number" min="5" max="1440" value="220" style="max-width:150px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Variacion (min, hasta +/-)</span>
+              <input id="acctPubJitter" class="control-input" type="number" min="0" max="120" value="30" style="max-width:170px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Minimo entre posts (min)</span>
+              <input id="acctPubMinGap" class="control-input" type="number" min="5" max="1440" value="45" style="max-width:170px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Idioma de los posts</span>
+              <select id="acctPubLang" class="control-input" style="max-width:150px;">
+                <option value="en">Ingles</option>
+                <option value="es">Espanol</option>
+              </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Maximo de caracteres</span>
+              <input id="acctPubMax" class="control-input" type="number" min="80" max="4000" value="280" style="max-width:150px;" />
+            </label>
+          </div>
+          <label style="display:flex; flex-direction:column; gap:4px; margin-top:12px;">
+            <span class="form-hint">Temas de la cuenta (uno por linea o separados por comas). La IA rotara entre ellos; si lo dejas vacio, escribira del estilo general.</span>
+            <textarea id="acctPubTopics" class="control-input" rows="3" style="width:100%; resize:vertical;" placeholder="productividad, IA aplicada, errores de fundador..."></textarea>
+          </label>
+          <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+            <button id="acctPubSave" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Guardar ajustes</button>
+            <button id="acctPubToggle" class="control-btn-small success"><i class="ph ph-power"></i> Activar publicacion diaria</button>
+            <button id="acctPubStop" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Parar publicacion diaria</button>
+            <button id="acctPubNow" class="control-btn-small"><i class="ph ph-paper-plane-tilt"></i> Publicar uno ahora</button>
+            <button id="acctPubPreview" class="control-btn-small"><i class="ph ph-eye"></i> Generar sin publicar</button>
+            <span id="acctPubBadge" class="status-badge">Sin configurar</span>
+          </div>
+          <div id="acctPubBox" style="display:none; margin-top:12px; padding:12px 14px; border-radius:10px; background:#101c2e; border:1px solid #1e3a63;">
+            <p id="acctPubMsg" style="font-size:13.5px; color:#9cc3ff; margin:0;"></p>
+          </div>
+          <div id="acctPubHistory" style="margin-top:14px;"></div>
+          <details style="margin-top:10px;">
+            <summary class="form-hint" style="cursor:pointer;">Ver ultimos posts generados</summary>
+            <div id="acctPubFeed" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+          </details>
+        </div>
+      </section>
+
       <!-- View: Auto Download -->
       <section id="view-autodownload" class="view-section">
         <header class="view-header">
@@ -1315,7 +1593,28 @@
           </div>
           <span id="xWorkerBadge" class="status-badge">Worker detenido</span>
         </header>
-        <div class="x-grid">
+        
+        <!-- MARKER: XAP-UI-v1 -->
+        <div id="xLoginBanner" class="tt-login-banner card" style="margin-bottom:14px;">
+          <div class="tt-login-row">
+            <span class="tt-login-icon"><i class="ph ph-x-logo"></i></span>
+            <div class="tt-login-text">
+              <strong id="xLoginTitle">Sesion de X (Twitter)</strong>
+              <span id="xLoginMessage">Inicia sesion en la ventana de X o pega tus cookies para publicar automaticamente.</span>
+            </div>
+            <span id="xLoginStateBadge" class="status-badge">Sin comprobar</span>
+            <button id="xLoginBtn" class="control-btn-small primary"><i class="ph ph-browser"></i> Iniciar sesion</button>
+            <button id="xLoginSaveBtn" class="control-btn-small success"><i class="ph ph-floppy-disk"></i> Guardar sesion</button>
+            <button id="xLoginCloseBtn" class="control-btn-small danger"><i class="ph ph-x"></i> Cerrar</button>
+            <button id="xRetryBtn" class="control-btn-small" title="Reprogramar los posts que fallaron"><i class="ph ph-arrows-clockwise"></i> Reintentar fallidos</button>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:flex-start;">
+            <textarea id="xCookiesInput" rows="2" placeholder="O pega aqui tus cookies de X (formato header: auth_token=...; ct0=...  o JSON exportado)" style="flex:1; min-width:260px; font-family:monospace; font-size:11px; padding:8px; border-radius:8px; border:1px solid var(--border-color, #2a2a2a); background:var(--bg-input, #111); color:inherit; resize:vertical;"></textarea>
+            <button id="xCookiesBtn" class="control-btn-small"><i class="ph ph-key"></i> Importar cookies</button>
+          </div>
+        </div>
+
+<div class="x-grid">
           <div class="card">
             <div class="card-title">Perfil y automatizacion</div>
             <div class="settings-grid">
@@ -1327,14 +1626,28 @@
               <div class="form-group"><label>Fuente de contenido</label><select id="xContentMode" class="control-input"><option value="ai">Generar con IA</option><option value="recent-search">Buscar posts recientes y reinterpretar</option></select></div>
               <div class="form-group"><label>Tema de busqueda en X</label><input id="xSearchTopic" class="control-input" placeholder="automatizacion con IA"></div>
             </div>
+            <!-- MARKER: XAP-LANG-UI-v1 -->
+            <div class="form-group" style="margin-top:16px"><label>Idioma de los posts</label><select id="xLanguage" class="control-input" style="max-width:220px;"><option value="en">Ingles</option><option value="es">Espanol</option></select></div>
             <div class="form-group" style="margin-top:16px"><label>Prompt maestro</label><textarea id="xMasterPrompt" class="control-input" rows="5"></textarea></div>
-            <div class="settings-grid" style="margin-top:16px">
-              <div class="form-group"><label>Proveedor IA</label><select id="xAiProvider" class="control-input"><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="deepseek">DeepSeek</option></select></div>
-              <div class="form-group"><label>Modelo IA</label><input id="xAiModel" class="control-input" placeholder="gpt-4o-mini"></div>
-              <div class="form-group"><label>API key IA</label><input id="xAiKey" class="control-input" type="password" placeholder="Dejar vacio para simulacion"></div>
-              <div class="form-group"><label>Token de acceso X</label><input id="xAccessToken" class="control-input" type="password" placeholder="Solo para modo live"></div>
-              <div class="form-group"><label>Bearer token X</label><input id="xBearerToken" class="control-input" type="password" placeholder="Para busqueda reciente"></div>
+            <!-- MARKER: XAP-AI-CLEAN-v1 -->
+            <div class="card" style="margin-top:16px; background:#101317; border:1px solid #242a33;">
+              <div class="card-title" style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                <i class="ph ph-brain"></i> Modelo de IA
+                <span class="tag-ok">automatico</span>
+              </div>
+              <p class="form-hint" style="margin-bottom:10px;">La IA se elige sola, gratis primero. Se configura una vez en <b>Configuracion IA</b>.</p>
+              <div id="xAiChainPreview" class="ai-chain-list"></div>
+              <button id="xAiConfigLink" class="control-btn-small" style="margin-top:10px;"><i class="ph ph-gear"></i> Abrir Configuracion IA</button>
             </div>
+
+            <details id="xAdvancedTokens" style="margin-top:14px;">
+              <summary style="cursor:pointer; color:var(--text-muted, #8b95a5); font-size:12.5px;">Opciones avanzadas: publicar con la API oficial de X (no necesario)</summary>
+              <p class="form-hint" style="margin-top:8px;">Solo si vas a usar la API oficial en vez de tu sesion de X. En el uso normal, dejalo vacio.</p>
+              <div class="settings-grid">
+                <div class="form-group"><label>Token de acceso X</label><input id="xAccessToken" class="control-input" type="password" placeholder="Solo para la API oficial"></div>
+                <div class="form-group"><label>Bearer token X</label><input id="xBearerToken" class="control-input" type="password" placeholder="Para busqueda reciente"></div>
+              </div>
+            </details>
             <label class="toggle-line" style="margin-top:18px"><input id="xEnabled" type="checkbox"><span>Activar generacion diaria autonoma</span></label>
             <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap"><button id="xSaveBtn" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Guardar</button><button id="xGenerateBtn" class="control-btn-small"><i class="ph ph-sparkle"></i> Generar ahora</button><button id="xClearQueueBtn" class="control-btn-small danger"><i class="ph ph-trash"></i> Borrar pendientes</button></div>
             <p id="xLiveStatus" class="form-hint">Las claves no se muestran despues de guardarlas. El modo simulacion no publica en X.</p>
@@ -1361,6 +1674,9 @@
   <script src="studio-assets/studio.js"></script>
   <script src="autoclone.js"></script>
   <script src="autopost.js"></script>
+    <script src="acct-session.js" defer></script>
+    <script src="acct-radar-ui.js" defer></script>
+<!-- MARKER: LANG-EN-FIRST-v1 -->
 </body>
 
 </html>

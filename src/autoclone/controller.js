@@ -206,8 +206,13 @@ function normalizeHandle(target) {
 function parseVideoUrl(target) {
   const value = String(target || "").trim();
   if (!value) return null;
-  const match = value.match(
-    /^https?:\/\/(?:www\.|m\.)?tiktok\.com\/(@[^/?#]+)\/video\/(\d+)/i
+  // [ERROR-VISIBLE] regex
+  // Acepta, ademas del enlace canonico:
+  //   - sin protocolo (www.tiktok.com/...)
+  //   - subdominios de idioma (es.tiktok.com, m.tiktok.com...)
+  const normalizado = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  const match = normalizado.match(
+    /^https?:\/\/(?:[a-z0-9-]+\.)?tiktok\.com\/(@[^/?#]+)\/video\/(\d+)/i
   );
   if (match) {
     return {
@@ -218,6 +223,11 @@ function parseVideoUrl(target) {
   }
   // Short share links (vm.tiktok.com/XXXX, vt.tiktok.com/XXXX) carry no id here;
   // yt-dlp resolves them, but we still flag them as single-video requests.
+  // [ERROR-VISIBLE] cortos
+  // vm./vt. y tambien el /t/ del boton Compartir; yt-dlp los resuelve.
+  if (/^https?:\/\/(?:www\.|m\.)?tiktok\.com\/t\//i.test(value)) {
+    return { url: value, username: "", id: "" };
+  }
   if (/^https?:\/\/(?:vm|vt)\.tiktok\.com\//i.test(value)) {
     return { url: value, username: "", id: "" };
   }
@@ -298,6 +308,28 @@ class AutoCloneController extends EventEmitter {
       path.resolve(config.projectRoot, ".runtime", "competitor", "settings.json"),
       {},
     );
+// MARKER: AICFG-BRIDGE-v1
+    try {
+      const globalAi = require("../ai-config");
+      await globalAi.load();
+      const globalKeys = globalAi.publicConfig().providerKeys || {};
+      const hasGlobal = Object.values(globalKeys).some((entry) => entry && entry.configured);
+      if (hasGlobal) {
+        const pick = (id) => (globalKeys[id] && globalKeys[id].configured ? globalAi.keyFor(id) : "");
+        return {
+          apiKey: pick("gemini-free"),
+          paidApiKey: pick("gemini-paid"),
+          paidModel: "gemini-3.6-flash",
+          openRouterKey: pick("openrouter"),
+          deepSeekKey: pick("deepseek"),
+          xKiroKey: pick("xkiro"),
+          model: "gemini-3.6-flash",
+          visionModel: "gemini-3.6-flash",
+          fromGlobalConfig: true,
+        };
+      }
+    } catch { /* sin config global: usa las claves de siempre */ }
+
     return {
       // Free key (gemini-2.5-flash) is used first; the paid key only kicks in
       // once the free quota is exhausted. Keep both paid names for old settings.
@@ -312,6 +344,7 @@ class AutoCloneController extends EventEmitter {
       paidModel: competitorSettings.paidGeminiModel || process.env.GEMINI_PAID_MODEL || "gemini-3.6-flash",
       openRouterKey: competitorSettings.openRouterApiKey || process.env.OPENROUTER_API_KEY || "",
       deepSeekKey: competitorSettings.deepSeekApiKey || process.env.DEEPSEEK_API_KEY || "", // DS[ac-read]
+      xKiroKey: competitorSettings.xKiroApiKey || process.env.XKIRO_API_KEY || "", // XKR[xkiro-rotacion]
       model: competitorSettings.model || "gemini-3.6-flash",
       visionModel: process.env.AUTOCLONE_VISION_MODEL || competitorSettings.model || "gemini-3.6-flash",
     };
@@ -545,6 +578,7 @@ class AutoCloneController extends EventEmitter {
             paidApiKey: ai.paidApiKey,
             paidModel: ai.paidModel,
             openRouterKey: ai.openRouterKey,
+            xKiroKey: ai.xKiroKey,
             logger: (m) => this._report("download", m, {}),
           });
         } catch (metaError) {
@@ -562,7 +596,30 @@ class AutoCloneController extends EventEmitter {
         await this._saveJob(job);
         return videos;
       } catch (error) {
-        throw new Error(`No se pudo descargar el video (${error.message}). Comprueba que el enlace sea publico y correcto.`);
+// [ERROR-VISIBLE] inicio
+        // Extrae la ultima linea util de stderr, que es donde yt-dlp
+        // explica el motivo real (privado, no disponible, login, geo...).
+        const crudo = String(error.stderr || "").trim();
+        const ultimaUtil = crudo
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l && /ERROR|WARNING|Unable|not available|Sign in/i.test(l))
+          .pop() || crudo.split(/\r?\n/).filter(Boolean).pop() || "";
+        if (crudo) {
+          try {
+            await fs.writeFile(
+              path.join(downloadDir, "error-ytdlp.txt"),
+              `URL: ${job.videoUrl}\n\n${crudo}\n`,
+              "utf8",
+            );
+          } catch (_) { /* el diagnostico no debe romper la ejecucion */ }
+        }
+        const detalle = ultimaUtil ? ` - ${ultimaUtil.replace(/^ERROR:\s*/i, "")}` : "";
+        throw new Error(
+          `No se pudo descargar el video (codigo ${error.code || "?"}${detalle}). ` +
+          `Se guardo el detalle completo en ${path.join(downloadDir, "error-ytdlp.txt")}.`
+        );
+// [ERROR-VISIBLE] fin
       }
     }
 
@@ -622,6 +679,7 @@ class AutoCloneController extends EventEmitter {
             paidApiKey: ai.paidApiKey,
             paidModel: ai.paidModel,
             openRouterKey: ai.openRouterKey,
+            xKiroKey: ai.xKiroKey,
             logger: (m) => this._report("download", m, {}),
           });
         } catch (metaError) {
@@ -685,6 +743,7 @@ class AutoCloneController extends EventEmitter {
           paidApiKey: ai.paidApiKey,
           paidModel: ai.paidModel,
           openRouterKey: ai.openRouterKey,
+            xKiroKey: ai.xKiroKey,
           deepSeekKey: ai.deepSeekKey,
           model: ai.visionModel, // DS[ac-pass]
           workDir,

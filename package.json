@@ -49,12 +49,12 @@
   },
   "homepage": "https://github.com/Katzca/AutoSocial#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@phosphor-icons/web": "^2.1.2",
     "@xyflow/react": "^12.11.6",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "luxon": "^3.7.2",
@@ -73,7 +73,7 @@
     "vite": "^6.4.3"
   },
   "allowScripts": {
-    "better-sqlite3@11.10.0": true,
-    "esbuild@0.25.12": true
+    "esbuild@0.25.12": true,
+    "better-sqlite3@12.10.0": true
   }
 }

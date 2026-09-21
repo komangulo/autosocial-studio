@@ -1,0 +1,17 @@
+{
+  "aiProviderKeys": {
+    "gemini-paid": "AQ.Ab8RN6LkdplufkyGuaJtfU__yKqg5WZnDVMngiitY7Lsk4uVWg",
+    "deepseek": "sk-9d3a8134b71d4d53bb84ec18bad8150a",
+    "xkiro": "sk-xt-99b0c95c87e19fd5750c14527f1fe242ed3bb21ee4f8224c"
+  },
+  "aiPreferredModel": "auto",
+  "aiChainEnabled": true,
+  "aiLastTest": {
+    "ok": true,
+    "provider": "xkiro",
+    "model": "minimax/minimax-m3:free",
+    "ms": 1179,
+    "sample": "OK",
+    "at": "2026-09-17T19:01:42.420Z"
+  }
+}

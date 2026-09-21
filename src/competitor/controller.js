@@ -90,7 +90,8 @@ class CompetitorController extends EventEmitter {
     super();
     this.setMaxListeners(200);
     this.running = false;
-    this.settings = { geminiApiKey: "", paidGeminiApiKey: "", freeGeminiApiKey: "", openRouterApiKey: "", deepSeekApiKey: "", model: aiAnalyst.DEFAULT_MODEL, brand: "", language: "es" }; // DS[settings]
+    this.settings = { geminiApiKey: "", paidGeminiApiKey: "", freeGeminiApiKey: "", openRouterApiKey: "", xKiroApiKey: "", // XKC[controller][default]
+          deepSeekApiKey: "", model: aiAnalyst.DEFAULT_MODEL, brand: "", language: "es" }; // DS[settings]
     this.lastProgress = { stage: "idle", detail: "", handle: "", at: null };
   }
 
@@ -106,6 +107,8 @@ class CompetitorController extends EventEmitter {
       hasPaidGeminiKey: Boolean(this.settings.paidGeminiApiKey || this.settings.geminiApiKey),
       hasOpenRouterKey: Boolean(this.settings.openRouterApiKey),
       hasDeepSeekKey: Boolean(this.settings.deepSeekApiKey),
+      hasXKiroKey: Boolean(this.settings.xKiroApiKey), // XKC[controller][status]
+      xKiroKeyMasked: this.settings.xKiroApiKey ? `${this.settings.xKiroApiKey.slice(0, 6)}...${this.settings.xKiroApiKey.slice(-4)}` : "",
       deepSeekKeyMasked: this.settings.deepSeekApiKey ? `${this.settings.deepSeekApiKey.slice(0, 6)}...${this.settings.deepSeekApiKey.slice(-4)}` : "",
       deepSeekModel: "deepseek-flash", // DS[status]
       hasFreeGeminiKey: Boolean(this.settings.freeGeminiApiKey),
@@ -170,7 +173,12 @@ class CompetitorController extends EventEmitter {
       if (patch.deepSeekApiKey.trim()) this.settings.deepSeekApiKey = patch.deepSeekApiKey.trim();
       else if (patch.deepSeekApiKey === "") this.settings.deepSeekApiKey = "";
     }
-    if (patch.removeDeepSeek) this.settings.deepSeekApiKey = ""; // DS[save]
+    if (patch.removeDeepSeek) this.settings.deepSeekApiKey = "";
+    if (typeof patch.xKiroApiKey === "string") {
+      if (patch.xKiroApiKey.trim()) this.settings.xKiroApiKey = patch.xKiroApiKey.trim();
+      else if (patch.xKiroApiKey === "") this.settings.xKiroApiKey = "";
+    } // XKC[controller][save]
+    if (patch.removeXKiro) this.settings.xKiroApiKey = ""; // DS[save]
     if (typeof patch.model === "string" && patch.model.trim()) this.settings.model = patch.model.trim();
     if (typeof patch.brand === "string") this.settings.brand = patch.brand.trim().slice(0, 120);
     if (typeof patch.language === "string") this.settings.language = patch.language.trim().slice(0, 20) || "es";
@@ -288,6 +296,9 @@ class CompetitorController extends EventEmitter {
         paidApiKey: this.settings.paidGeminiApiKey || this.settings.geminiApiKey,
         paidModel: "gemini-3.6-flash",
         openRouterKey: this.settings.openRouterApiKey,
+        xKiroKey: this.settings.xKiroApiKey || process.env.XKIRO_API_KEY || "", // XKA[analisis][controller]
+        deepSeekKey: this.settings.deepSeekApiKey || process.env.DEEPSEEK_API_KEY || "", // DSA[analisis][controller]
+        onProgress: (p) => this._report(p.stage || "analysis", p.detail || ""),
         model: this.settings.model,
         brand: brand ?? this.settings.brand,
         language: language ?? this.settings.language,

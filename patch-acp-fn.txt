@@ -1,0 +1,17 @@
+// TSAFE-ACP-QUALITY: capa de decision TypeSafe para la publicacion diaria.
+// Devuelve null si TypeSafe no esta configurado o falla (nunca rompe el flujo).
+async function typesafeQuality(profile, text, max) {
+  try {
+    const ts = require("./typesafe");
+    if (!ts.configured || !ts.configured()) return null;
+    const lang = String(profile.config.language || "en").toLowerCase() === "es" ? "es" : "en";
+    return await ts.decide("publish_quality", {
+      texto_generado: String(text || "").slice(0, 1500),
+      master_prompt: "Publicar un post original breve sobre el tema del perfil, sin enlaces ni arrobas.",
+      idioma_esperado: lang,
+      max_caracteres: max,
+    });
+  } catch {
+    return null;
+  }
+}

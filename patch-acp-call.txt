@@ -1,0 +1,6 @@
+
+  // TSAFE-ACP-CALL: control de calidad TypeSafe antes de publicar.
+  const tsQuality = await typesafeQuality(profile, text, max);
+  if (tsQuality && tsQuality.verdict && !tsQuality.verdict.ok) {
+    throw new Error(`TypeSafe: calidad insuficiente (${tsQuality.verdict.reason}).`);
+  }

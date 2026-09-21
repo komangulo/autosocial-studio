@@ -278,6 +278,179 @@ async function createServer() {
   });
   app.use(express.static(path.join(__dirname, "..", "web")));
 
+  
+  // MARKER: XAP-ROUTES-v1
+  app.get("/api/x-autopilot/session", async (req, res) => {
+    try {
+      const account = await getActiveAccount();
+      const status = await xAutopilot.getStatus(account.id);
+      res.json({ ok: true, ...status, worker: Boolean(status && status.worker) });
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/x-autopilot/login", async (req, res) => {
+    try { res.json(await require("./x-auth").startLoginSession()); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/x-autopilot/login/save", async (req, res) => {
+    try { res.json(await require("./x-auth").saveLoginSession()); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/x-autopilot/login/close", async (req, res) => {
+    try { res.json(await require("./x-auth").closeLoginSession()); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/x-autopilot/cookies", async (req, res) => {
+    try {
+      const result = await require("./x-auth").importCookies(req.body?.cookies);
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/x-autopilot/retry", async (req, res) => {
+    try { res.json(await xAutopilot.retryFailed((await getActiveAccount()).id)); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  
+  // MARKER: AICFG-ROUTES-v1
+  const aiConfig = require("./ai-config");
+  app.get("/api/ai-config", async (req, res) => {
+    try { await aiConfig.load(); res.json(aiConfig.publicConfig()); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/ai-config", async (req, res) => {
+    try { res.json(await aiConfig.save(req.body || {})); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/ai-config/test", async (req, res) => {
+    try {
+      const result = await aiConfig.testProvider(String(req.body?.provider || ""));
+      res.json(await aiConfig.rememberTest(result));
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  
+  // MARKER: ACCTAN-ROUTES-v1
+  const accountAnalyzer = require("./account-analyzer");
+  app.get("/api/account-analysis", async (req, res) => {
+    try { res.json({ ok: true, profiles: await accountAnalyzer.listProfiles(), job: await accountAnalyzer.getStatus() }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.get("/api/account-analysis/status", async (req, res) => {
+    try { res.json(await accountAnalyzer.getStatus()); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/account-analysis/start", async (req, res) => {
+    try {
+      const job = await accountAnalyzer.start(req.body?.handle, { maxPosts: req.body?.maxPosts });
+      res.json({ ok: true, job });
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.get("/api/account-analysis/:handle", async (req, res) => {
+    try {
+      const data = await accountAnalyzer.get(req.params.handle);
+      if (!data) { res.status(404).json({ ok: false, error: "Esa cuenta no esta analizada todavia." }); return; }
+      res.json({ ok: true, data });
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.delete("/api/account-analysis/:handle", async (req, res) => {
+    try { res.json({ ok: true, ...(await accountAnalyzer.remove(req.params.handle)) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  
+  // MARKER: ACCT-PUB-ROUTES-v1
+  const acctPublisher = require("./acct-publisher");
+  app.get("/api/acct-publisher/:handle", async (req, res) => {
+    try { res.json({ ok: true, profile: acctPublisher.publicProfile(req.params.handle) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/acct-publisher/:handle", async (req, res) => {
+    try { res.json({ ok: true, profile: await acctPublisher.configure(req.params.handle, req.body || {}) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/acct-publisher/:handle/now", async (req, res) => {
+    try {
+      const result = await acctPublisher.publishNow(req.params.handle, req.body?.count, {
+        topics: req.body?.topics,
+        dryRun: req.body?.dryRun === true,
+      });
+      res.json({ ok: true, result, profile: acctPublisher.publicProfile(req.params.handle) });
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/acct-publisher/:handle/clear", async (req, res) => {
+    try { res.json({ ok: true, profile: await acctPublisher.clearHistory(req.params.handle) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  
+  // MARKER: ACCTAN-REPORTS-v1
+  app.get("/api/account-analysis/:handle/reports", async (req, res) => {
+    try { res.json({ ok: true, reports: await accountAnalyzer.listReports(req.params.handle) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.get("/api/account-analysis/:handle/reports/:stamp", async (req, res) => {
+    try {
+      const data = await accountAnalyzer.getReport(req.params.handle, req.params.stamp);
+      if (!data) { res.status(404).json({ ok: false, error: "Ese informe no existe." }); return; }
+      res.json({ ok: true, data });
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/account-analysis/:handle/reports/:stamp/use", async (req, res) => {
+    try { res.json({ ok: true, ...(await accountAnalyzer.useReport(req.params.handle, req.params.stamp)) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.delete("/api/account-analysis/:handle/reports/:stamp", async (req, res) => {
+    try { res.json({ ok: true, ...(await accountAnalyzer.removeReport(req.params.handle, req.params.stamp)) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  
+  // MARKER: ACCT-PUB-STOP-ROUTE-v1
+  app.post("/api/acct-publisher/:handle/stop", async (req, res) => {
+    try { res.json({ ok: true, profile: await require("./acct-publisher").stop(req.params.handle) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  
+  // MARKER: ACCT-RADAR-ROUTES-v1
+  const acctRadar = require("./acct-radar");
+  app.get("/api/acct-radar/:handle", async (req, res) => {
+    try { await acctRadar.load(); res.json({ ok: true, profile: acctRadar.getStatus(req.params.handle) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/acct-radar/:handle", async (req, res) => {
+    try { await acctRadar.load(); res.json({ ok: true, profile: acctRadar.configure(req.params.handle, req.body || {}) }); }
+    catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+  app.post("/api/acct-radar/:handle/now", async (req, res) => {
+    try {
+      const run = await acctRadar.runOnce(req.params.handle, { dryRun: req.body?.dryRun === true, force: true });
+      const profile = acctRadar.getStatus(req.params.handle);
+      res.json({ ok: true, result: { published: run.published || [], skipped: run.skipped || 0, scan: run.scan || null }, profile });
+    } catch (error) { res.status(400).json({ ok: false, error: error.message }); }
+  });
+
+
+
   app.get("/api/google-flow/status", async (req, res) => {
     res.json(await googleFlow.getSessionStatus());
   });
@@ -1135,6 +1308,14 @@ async function createServer() {
     console.error(error);
     res.status(500).json({ ok: false, error: error.message });
   });
+
+
+  // MARKER: XAP-WORKER-START-v1
+  try { xAutopilot.startWorker(); } catch (error) { console.error("[x-autopilot] no se pudo arrancar el worker:", error.message); }
+
+
+  // MARKER: ACCT-PUB-BOOT-v1
+  try { require("./acct-publisher").startWorker(); } catch (error) { console.error("[acct-publisher] no se pudo arrancar el worker:", error.message); }
 
   ensureDashboardBindAllowed();
   app.listen(config.dashboardPort, config.dashboardHost, () => {

@@ -60,47 +60,46 @@ function extractHashtags(text) {
 }
 
 /**
+ * SIDECAR-DESC-ONLY
  * Read the companion metadata for a video. Returns null when there is none.
- * Shape: { title, description, hashtags: string[], caption: string }
+ * Shape: { description, caption, downloadIndex }
+ *
+ * Solo se conserva la descripcion (que ya incluye los hashtags). Los campos
+ * "title" y "hashtags" de sidecars antiguos se ignoran a proposito: el titulo
+ * de TikTok viene truncado y los hashtags duplicarian lo que ya hay.
  */
 async function readVideoMeta(videoPath) {
   try {
     const raw = await fs.readFile(getMetaPath(videoPath), "utf8");
     const data = JSON.parse(raw);
-    const title = String(data.title || "").trim();
     const description = String(data.description || "").trim();
-    const hashtags = Array.isArray(data.hashtags)
-      ? data.hashtags.map((t) => String(t).replace(/^#+/, "").trim()).filter(Boolean)
-      : extractHashtags(`${title} ${description}`);
-    const caption = buildCaptionFromMeta({ title, description, hashtags });
+    // El caption SIEMPRE se regenera desde la description: los sidecars
+    // antiguos traen un caption con el titulo truncado duplicado.
+    const caption = buildCaptionFromMeta({ description });
     const downloadIndex = Number.isInteger(data.downloadIndex) ? data.downloadIndex : null;
-    return { title, description, hashtags, caption, downloadIndex };
+    return { description, caption, downloadIndex };
   } catch {
     return null;
   }
 }
 
-/** Merge title, description and hashtags into a single TikTok caption. */
-function buildCaptionFromMeta({ title = "", description = "", hashtags = [] } = {}) {
-  const parts = [];
-  const cleanTitle = String(title || "").trim();
+/**
+ * META-DESC-ONLY-v1
+ * TikTok no tiene titulo: solo descripcion. El "title" de yt-dlp viene
+ * truncado con "..." y la descripcion ya incluye el texto y los hashtags.
+ * Por eso el caption es EXACTAMENTE la descripcion (sin duplicar ni anadir
+ * hashtags por separado). Si no hay descripcion, cae al titulo como ultimo
+ * recurso. Los parametros se aceptan por compatibilidad con las llamadas.
+ */
+function buildCaptionFromMeta({ title = "", description = "" } = {}) {
   const cleanDescription = String(description || "").trim();
-  // Skip the title when TikTok's description already starts with it (very common).
-  if (cleanTitle && !cleanDescription.toLowerCase().startsWith(cleanTitle.toLowerCase())) {
-    parts.push(cleanTitle);
-  }
-  if (cleanDescription) parts.push(cleanDescription);
+  if (cleanDescription) return cleanDescription;
+  return stripTruncation(String(title || ""));
+}
 
-  let text = parts.join("\n").trim();
-  const existing = new Set((text.match(/#[\p{L}\p{N}_]+/gu) || []).map((t) => t.toLowerCase()));
-  const missing = hashtags
-    .map((t) => String(t || "").replace(/^#+/, "").trim())
-    .filter(Boolean)
-    .filter((tag) => !existing.has(`#${tag}`.toLowerCase()));
-  if (missing.length) {
-    text = text ? `${text} ${missing.map((t) => `#${t}`).join(" ")}` : missing.map((t) => `#${t}`).join(" ");
-  }
-  return text.trim();
+/** Quita el sufijo de truncado que TikTok pone en los titulos ("..." / "…"). */
+function stripTruncation(text) {
+  return String(text || "").replace(/\s*(?:\.\.\.|…)\s*$/, "").trim();
 }
 
 async function readCaption(videoPath) {
@@ -161,6 +160,7 @@ module.exports = {
   readCaption,
   readVideoMeta,
   buildCaptionFromMeta,
+  stripTruncation,
   extractHashtags,
   getCaptionPaths,
   getMetaPath,

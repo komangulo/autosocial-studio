@@ -1,0 +1,582 @@
+// Radar de noticias + afiliados.
+//
+// MARKER: ACCT-RADAR-v1
+// MARKER: ACCT-RADAR-v3
+// MARKER: ACCT-RADAR-v4
+//
+// Escanea el buscador de X con TU sesion, usando las palabras clave que tu
+// escribas (casillero "Temas a escanear"). De cada resultado:
+//   - filtra que de verdad hable de los temas (y no sea respuesta/retuit vacio)
+//   - reescribe el texto con IA, muy leve, sin copiar y sin @/URLs
+//   - cambia los links de tienda (Amazon / eBay / Target) por TU link de afiliado
+//   - republica conservando las imagenes del post original
+// Deduplica por id de post y por "firma" de noticia, con tope diario.
+
+const fs = require("fs/promises");
+const path = require("path");
+const { config } = require("./config");
+const ai = require("./ai-config");
+const xAuth = require("./x-auth");
+
+const STATE_FILE = path.resolve(config.projectRoot, ".runtime", "acct-radar.json");
+
+const DEFAULTS = {
+  enabled: false,
+  keywords: [],
+  maxPerDay: 20,
+  language: "en",
+  everyMinutes: 60,
+  onlyLinks: false,
+  minGapMinutes: 45,
+  affiliate: {
+    amazon: "",
+    ebay: "",
+    target: "",
+  },
+};
+
+let state = { profiles: {} };
+let loaded = false;
+
+function nowIso() { return new Date().toISOString(); }
+function clone(v) { return JSON.parse(JSON.stringify(v)); }
+function safeHandle(h) {
+  return String(h || "").toLowerCase().replace(/[^a-z0-9_.-]/g, "").replace(/^\.+/, "").slice(0, 40);
+}
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+
+function profileState(handle) {
+  // El radar no necesita una cuenta analizada: publica con la sesion activa de
+  // X. Si no llega un @, se usa un perfil unico por defecto ("radar").
+  let key = safeHandle(handle);
+  if (!key) key = "radar";
+  if (!state.profiles[key]) {
+    state.profiles[key] = {
+      handle: key,
+      config: clone(DEFAULTS),
+      day: "",
+      publishedToday: 0,
+      seen: {},
+      history: [],
+      errors: [],
+      lastRun: "",
+      lastPublishedAt: "",
+      stoppedDay: "",
+    };
+  }
+  const p = state.profiles[key];
+  if (!p.config) p.config = clone(DEFAULTS);
+  if (!p.config.affiliate) p.config.affiliate = { amazon: "", ebay: "", target: "" };
+  if (!Array.isArray(p.config.keywords)) p.config.keywords = [];
+  if (!p.seen || typeof p.seen !== "object") p.seen = {};
+  if (!Array.isArray(p.history)) p.history = [];
+  if (!Array.isArray(p.errors)) p.errors = [];
+  if (p.day !== todayKey()) {
+    p.day = todayKey();
+    p.publishedToday = 0;
+  }
+  return p;
+}
+
+async function load() {
+  if (loaded) return;
+  loaded = true;
+  try {
+    const raw = await fs.readFile(STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.profiles) state = parsed;
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("[acct-radar] no se pudo leer el estado:", error.message);
+  }
+  // Migracion unica: perfiles con el antiguo idioma por defecto (espanol) pasan
+  // a ingles UNA sola vez. Si luego eliges espanol a proposito, se respeta.
+  let migrated = false;
+  for (const key of Object.keys(state.profiles || {})) {
+    const p = state.profiles[key];
+    if (!p || typeof p !== "object") continue;
+    if (!p.languageMigrated) {
+      p.languageMigrated = true;
+      if (p.config && String(p.config.language || "").toLowerCase() === "es") {
+        p.config.language = "en";
+        migrated = true;
+      }
+    }
+  }
+  if (migrated) save();
+}
+
+let saveQueue = Promise.resolve();
+function save() {
+  saveQueue = saveQueue.then(async () => {
+    await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
+    const tmp = `${STATE_FILE}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(state, null, 2));
+    await fs.rename(tmp, STATE_FILE);
+  }).catch((e) => console.error("[acct-radar] no se pudo guardar:", e.message));
+  return saveQueue;
+}
+
+// ---------------------------------------------------------------------------
+// Limpieza (misma filosofia que el analisis: nada de @, URLs ni correos)
+// ---------------------------------------------------------------------------
+function sanitizeOutput(text) {
+  return String(text || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\bwww\.\S+/gi, "")
+    .replace(/@[A-Za-z0-9_]{1,15}\b/g, "")
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/g, "")
+    .replace(/#[A-Za-z0-9_]+/g, "")
+    .replace(/\[(enlace|usuario|correo|link|url)\]/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ---------------------------------------------------------------------------
+// Filtro por palabras clave
+// ---------------------------------------------------------------------------
+function normalize(text) {
+  return String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// TSAFE-RADAR-HELPER: capa de decision TypeSafe (System One / Jev).
+// El codigo manda; Jev solo juzga. Si no esta o falla, devuelve null y el
+// radar sigue con su comportamiento anterior (nunca se rompe por TypeSafe).
+async function typesafeRelevance(post, keywords, cfg) {
+  try {
+    const ts = require("./typesafe");
+    if (!ts.configured || !ts.configured()) return null;
+    return await ts.decide("radar_relevance", {
+      tweet: String(post.text || "").slice(0, 1500),
+      temas: keywords,
+      idioma_preferido: cfg.language === "en" ? "en" : "es",
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function typesafeAffiliateStore(rawUrl, text, cfg) {
+  try {
+    const ts = require("./typesafe");
+    if (!ts.configured || !ts.configured()) return null;
+    const stores = [];
+    if (cfg.affiliate && cfg.affiliate.amazon) stores.push("amazon");
+    if (cfg.affiliate && cfg.affiliate.ebay) stores.push("ebay");
+    if (cfg.affiliate && cfg.affiliate.target) stores.push("target");
+    if (!stores.length) return null;
+    return await ts.decide("radar_affiliate", {
+      url: rawUrl,
+      texto_del_link: String(text || "").slice(0, 300),
+      tiendas: stores,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function matchesKeywords(text, keywords) {
+  const list = Array.isArray(keywords) ? keywords : String(keywords || "").split(/[\n,]/);
+  const hay = normalize(text);
+  return list.some((k) => {
+    const needle = normalize(k).trim();
+    return needle && hay.includes(needle);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Links de tienda -> link de afiliado del usuario
+// ---------------------------------------------------------------------------
+const STORE_DOMAINS = {
+  amazon: ["amazon.", "amzn.", "amzn.to", "a.co"],
+  ebay: ["ebay.", "ebay.to"],
+  target: ["target.", "tgt.", "goto.target"],
+};
+
+function detectStore(url) {
+  const u = String(url || "").toLowerCase();
+  for (const [store, domains] of Object.entries(STORE_DOMAINS)) {
+    if (domains.some((d) => u.includes(d))) return store;
+  }
+  return null;
+}
+
+function amazonTagUrl(rawUrl, tag) {
+  if (!tag) return null;
+  try {
+    const u = new URL(rawUrl);
+    u.searchParams.set("tag", tag.replace(/^tag=/, ""));
+    u.searchParams.delete("linkCode");
+    u.searchParams.delete("language");
+    u.searchParams.set("linkCode", "ll1");
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Devuelve el link de afiliado que corresponde a esta tienda.
+ * - Amazon: reconstruye el link del producto con tu tag (siempre funciona).
+ * - eBay / Target: si tu casilla es un link, se usa tal cual; si es un id,
+ *   se adjunta como parametro de campana.
+ */
+function affiliateUrlFor(rawUrl, cfg) {
+  // TSAFE-RADAR-STORE: TypeSafe puede haber decidido ya la tienda.
+  const store = detectStore(rawUrl) || (cfg.affiliate && cfg.affiliate.__store) || null;
+  if (!store) return null;
+  const aff = String((cfg.affiliate && cfg.affiliate[store]) || "").trim();
+  if (!aff) return { store, url: rawUrl, applied: false };
+  if (store === "amazon") {
+    if (/^https?:\/\//i.test(aff)) return { store, url: aff, applied: true };
+    const built = amazonTagUrl(rawUrl, aff);
+    return { store, url: built || rawUrl, applied: Boolean(built) };
+  }
+  let url = rawUrl;
+  try {
+    const u = new URL(rawUrl);
+    if (/^https?:\/\//i.test(aff)) {
+      url = aff;
+    } else if (store === "ebay") {
+      u.searchParams.set("mkcid", "1");
+      u.searchParams.set("mkrid", "711-53200-19255-0");
+      u.searchParams.set("campid", aff.replace(/^campid=/, ""));
+      u.searchParams.set("toolid", "10001");
+      url = u.toString();
+    } else {
+      u.searchParams.set("afid", aff.replace(/^afid=/, ""));
+      url = u.toString();
+    }
+  } catch {
+    url = rawUrl;
+  }
+  return { store, url, applied: url !== rawUrl };
+}
+
+function extractUrls(text) {
+  return String(text || "").match(/https?:\/\/[^\s)]+/gi) || [];
+}
+
+function rewriteAffiliateLinks(text, cfg) {
+  const urls = extractUrls(text);
+  if (!urls.length) return { text, applied: [] };
+  let out = text;
+  const applied = [];
+  for (const raw of urls) {
+    const res = affiliateUrlFor(raw, cfg);
+    if (res && res.applied) {
+      out = out.split(raw).join(res.url);
+      applied.push({ store: res.store, from: raw, to: res.url });
+    }
+  }
+  return { text: out, applied };
+}
+
+// ---------------------------------------------------------------------------
+// Escaneo del buscador de X
+// ---------------------------------------------------------------------------
+function searchUrl(query) {
+  return `https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query&f=live`;
+}
+
+async function scanKeyword(page, keyword, limit = 12) {
+  const url = searchUrl(keyword);
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+  // X tarda en pintar resultados; esperamos a que aparezca al menos un tweet o
+  // se detecte el muro de login. Asi distinguimos "no hay resultados" de
+  // "sesion no activa" en vez de devolver 0 en silencio.
+  let sawLoginWall = false;
+  try {
+    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 15000 });
+  } catch {
+    sawLoginWall = await page.evaluate(() => {
+      const body = (document.body && document.body.innerText) || "";
+      return /Iniciar sesi[oó]n|Log in|Sign in|Something went wrong|Algo sali[oó] mal/i.test(body);
+    }).catch(() => false);
+  }
+  // Un poco de scroll para cargar mas resultados (la busqueda live los pagina).
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate("window.scrollBy(0, window.innerHeight * 1.5)").catch(() => {});
+    await page.waitForTimeout(1200);
+  }
+  const collected = await page.evaluate((max) => {
+    const out = [];
+    // Mismos selectores que el analizador: `article` o el contenedor de celda,
+    // segun la version de X.
+    const cells = Array.from(document.querySelectorAll('article, [data-testid="cellInnerDiv"]'));
+    for (const art of cells) {
+      if (out.length >= max) break;
+      const link = art.querySelector('a[href*="/status/"]');
+      const href = link ? link.getAttribute("href") : "";
+      const textEl = art.querySelector('[data-testid="tweetText"]');
+      const text = textEl ? textEl.innerText : "";
+      const imgs = Array.from(art.querySelectorAll('img[src*="media"]')).map((i) => i.getAttribute("src")).filter(Boolean);
+      const time = art.querySelector("time");
+      if (!href || !text) continue;
+      out.push({ permalink: href, text, images: imgs, postedAt: time ? time.getAttribute("datetime") : "" });
+    }
+    return out;
+  }, limit);
+  return { posts: collected, sawLoginWall };
+}
+
+function postIdFromPermalink(href) {
+  const m = String(href || "").match(/\/status\/(\d+)/);
+  return m ? m[1] : String(href || "");
+}
+
+function signatureOf(text) {
+  return normalize(text).replace(/[^a-z0-9 ]/g, "").split(/\s+/).filter((w) => w.length > 4).slice(0, 8).join("-");
+}
+
+// ---------------------------------------------------------------------------
+// Reescritura con IA (muy leve) + sustitucion de links
+// ---------------------------------------------------------------------------
+async function rewritePost(original, cfg, keyword) {
+  const lang = cfg.language === "en" ? "English" : "espanol";
+  const system = [
+    "Eres un curador de noticias de coleccionables (TCG).",
+    "Reescribe la noticia en tus propias palabras, en tono de aviso breve.",
+    `Escribe en ${lang}.`,
+    "No menciones usuarios, ni arrobas, ni enlaces, ni hashtags.",
+    "No copies frases textuales del original.",
+    "Devuelve SOLO el texto del post, sin comillas ni explicaciones.",
+  ].join(" ");
+  const prompt = [
+    `Tema: ${keyword}`,
+    "Noticia original (reescribela, no la copies):",
+    original.slice(0, 600),
+  ].join("\n");
+  const result = await ai.generate(prompt, { system });
+  const clean = sanitizeOutput(result && result.text ? result.text : (typeof result === "string" ? result : ""));
+  return { text: clean, provider: result ? result.provider : "" };
+}
+
+// ---------------------------------------------------------------------------
+// Publicacion. postTweet abre su propia sesion, asi que reescribimos el flujo
+// con imagenes del original cuando las haya.
+// ---------------------------------------------------------------------------
+async function publishWithImages(text, images) {
+  if (typeof xAuth.postTweetRich === "function") return xAuth.postTweetRich(text, images || []);
+  return xAuth.postTweet(text);
+}
+
+// ---------------------------------------------------------------------------
+// Ciclo del radar
+// ---------------------------------------------------------------------------
+async function runOnce(handle, options = {}) {
+  await load();
+  const p = profileState(handle);
+  const cfg = p.config;
+  const keywords = (cfg.keywords || []).map((k) => String(k).trim()).filter(Boolean);
+  if (!keywords.length) throw new Error("Anade al menos una palabra clave en el casillero de temas.");
+  if (p.publishedToday >= Number(cfg.maxPerDay || 20)) {
+    return { ok: true, published: [], message: "Tope diario alcanzado." };
+  }
+  if (p.stoppedDay === todayKey()) {
+    return { ok: true, published: [], message: "Radar detenido hoy. Manana vuelve a su ritmo." };
+  }
+  // Candado de tiempo: no mas de un ciclo completo dentro del margen minimo.
+  const minGap = Math.max(15, Number(cfg.minGapMinutes) || 45);
+  if (p.lastRun && !options.force) {
+    const since = (Date.now() - new Date(p.lastRun).getTime()) / 60000;
+    if (since < minGap) {
+      return { ok: true, published: [], message: `Esperando ${Math.ceil(minGap - since)} min antes del proximo escaneo.` };
+    }
+  }
+
+  const session = await xAuth.openScratchContext();
+  const page = session.page;
+  const published = [];
+  const skipped = [];
+  const scan = { keywords: keywords.length, found: 0, loginWall: false, perKeyword: [] };
+  try {
+    for (const keyword of keywords) {
+      if (p.publishedToday + published.length >= Number(cfg.maxPerDay || 20)) break;
+      let posts = [];
+      try {
+        const scanned = await scanKeyword(page, keyword, options.perKeyword || 12);
+        posts = scanned.posts;
+        if (scanned.sawLoginWall) scan.loginWall = true;
+        scan.perKeyword.push({ keyword, found: posts.length });
+        scan.found += posts.length;
+      } catch (e) {
+        p.errors.push({ at: nowIso(), keyword, error: e.message });
+        scan.perKeyword.push({ keyword, found: 0, error: e.message });
+        continue;
+      }
+      for (const post of posts) {
+        if (p.publishedToday + published.length >= Number(cfg.maxPerDay || 20)) break;
+        const id = postIdFromPermalink(post.permalink);
+        if (id && p.seen[id]) { skipped.push({ id, why: "duplicado" }); continue; }
+        if (!matchesKeywords(post.text, keywords)) { skipped.push({ id, why: "fuera de tema" }); continue; }
+        // TSAFE-RADAR-FILTER: si TypeSafe esta disponible, juzga de verdad si el
+        // tweet es una noticia publicable antes de gastar una reescritura.
+        const tsRelevance = await typesafeRelevance(post, keywords, cfg);
+        if (tsRelevance && tsRelevance.verdict) {
+          scan.typesafe = (scan.typesafe || 0) + 1;
+          if (!tsRelevance.verdict.ok) {
+            skipped.push({ id, why: `typesafe:${tsRelevance.verdict.reason}`, ts: tsRelevance.verdict.scores });
+            continue;
+          }
+        }
+
+        const sig = signatureOf(post.text);
+        if (sig && p.seen[`sig:${sig}`]) { skipped.push({ id, why: "misma noticia" }); continue; }
+        const hasLink = extractUrls(post.text).length > 0;
+        if (cfg.onlyLinks && !hasLink) { skipped.push({ id, why: "sin link" }); continue; }
+
+        let rewritten;
+        try {
+          rewritten = await rewritePost(post.text, cfg, keyword);
+        } catch (e) {
+          p.errors.push({ at: nowIso(), id, error: e.message });
+          continue;
+        }
+        if (!rewritten.text || rewritten.text.length < 20) { skipped.push({ id, why: "salida vacia" }); continue; }
+
+        // Los links vienen del post ORIGINAL (la IA reescribe sin URLs). Se
+        // sustituyen por tu link de afiliado y se anaden al final.
+        const affLinks = [];
+        for (const raw of extractUrls(post.text)) {
+        // TSAFE-RADAR-AFF: si la deteccion por dominio falla, TypeSafe decide la tienda
+        // (links acortados o dominios raros) antes de descartar el link.
+        for (const raw of extractUrls(post.text)) {
+          let res = affiliateUrlFor(raw, cfg);
+          if ((!res || !res.applied) && !detectStore(raw)) {
+            const guessed = await typesafeAffiliateStore(raw, post.text, cfg);
+            if (guessed && guessed.verdict && guessed.verdict.ok && guessed.verdict.store) {
+              res = affiliateUrlFor(raw, {
+                ...cfg,
+                affiliate: { ...cfg.affiliate, __store: guessed.verdict.store },
+              });
+            }
+          }
+          if (res && res.applied) affLinks.push(res);
+        }
+        }
+        let finalText = rewritten.text;
+        if (affLinks.length) {
+          const seen2 = new Set();
+          for (const a of affLinks) {
+            if (seen2.has(a.url)) continue;
+            seen2.add(a.url);
+            finalText = `${finalText}\n${a.url}`;
+          }
+        }
+        const withAff = { text: finalText, applied: affLinks };
+        if (hasLink && !affLinks.length) {
+          // habia link pero no tienes configurada esa tienda: se publica sin link
+        }
+        if (options.dryRun) {
+          published.push({ dryRun: true, keyword, text: withAff.text, images: post.images.length });
+          continue;
+        }
+
+        try {
+          const url = await publishWithImages(withAff.text, post.images);
+          p.publishedToday += 1;
+          if (id) p.seen[id] = nowIso();
+          if (sig) p.seen[`sig:${sig}`] = nowIso();
+          p.history.push({
+            at: nowIso(), keyword, permalink: post.permalink, url,
+            text: withAff.text, affiliate: withAff.applied, provider: rewritten.provider,
+          });
+          published.push({ keyword, url, text: withAff.text });
+          await page.waitForTimeout(8000 + Math.floor(Math.random() * 12000));
+        } catch (e) {
+          p.errors.push({ at: nowIso(), id, error: e.message });
+        }
+      }
+    }
+  } finally {
+    await session.close().catch(() => {});
+  }
+
+  // Poda del historial de vistos para que no crezca sin fin.
+  const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
+  for (const [k, v] of Object.entries(p.seen)) {
+    if (v && new Date(v).getTime() < cutoff) delete p.seen[k];
+  }
+  if (p.errors.length > 200) p.errors = p.errors.slice(-200);
+  p.lastRun = nowIso();
+  await save();
+  return { ok: true, published, skipped: skipped.length, scan };
+}
+
+function getStatus(handle) {
+  const p = profileState(handle);
+  return {
+    handle: p.handle,
+    config: p.config,
+    publishedToday: p.publishedToday,
+    maxPerDay: p.config.maxPerDay,
+    lastRun: p.lastRun,
+    history: p.history.slice(-15).reverse(),
+    errors: p.errors.slice(-10).reverse(),
+    seen: Object.keys(p.seen).length,
+  };
+}
+
+function configure(handle, patch = {}) {
+  const p = profileState(handle);
+  const c = p.config;
+  if (patch.keywords !== undefined) {
+    const list = Array.isArray(patch.keywords)
+      ? patch.keywords
+      : String(patch.keywords || "").split(/[\n,]/);
+    c.keywords = list.map((k) => String(k).trim()).filter(Boolean).slice(0, 50);
+  }
+  if (patch.maxPerDay !== undefined) c.maxPerDay = Math.max(1, Math.min(100, Number(patch.maxPerDay) || 20));
+  if (patch.language !== undefined) {
+    c.language = String(patch.language) === "es" ? "es" : "en";
+    c.languageChosen = c.language;
+  }
+  if (patch.everyMinutes !== undefined) c.everyMinutes = Math.max(15, Math.min(1440, Number(patch.everyMinutes) || 60));
+  if (patch.onlyLinks !== undefined) c.onlyLinks = Boolean(patch.onlyLinks);
+  if (patch.affiliate !== undefined && typeof patch.affiliate === "object") {
+    c.affiliate = {
+      amazon: String(patch.affiliate.amazon || "").trim(),
+      ebay: String(patch.affiliate.ebay || "").trim(),
+      target: String(patch.affiliate.target || "").trim(),
+    };
+  }
+  if (patch.enabled !== undefined) c.enabled = Boolean(patch.enabled);
+  save();
+  return clone(c);
+}
+
+function addError(handle, message) {
+  const p = profileState(handle);
+  p.errors.push({ at: nowIso(), error: message });
+  if (p.errors.length > 200) p.errors = p.errors.slice(-200);
+  save();
+}
+
+/**
+ * Parada de emergencia del radar: no vuelve a ejecutar nada hoy.
+ */
+function stop(handle) {
+  const p = profileState(handle);
+  p.stoppedDay = todayKey();
+  p.config.enabled = false;
+  save();
+  return getStatus(handle);
+}
+
+module.exports = {
+  load,
+  configure,
+  getStatus,
+  runOnce,
+  rewriteAffiliateLinks,
+  affiliateUrlFor,
+  detectStore,
+  matchesKeywords,
+  sanitizeOutput,
+  scanKeyword,
+  addError,
+  stop,
+  STATE_FILE,
+  DEFAULTS,
+};

@@ -1,0 +1,145 @@
+// Radar de noticias y afiliados - UI
+//
+// MARKER: ACCT-RADAR-UI-v1
+//
+// Panel independiente dentro de "Analisis de cuenta". Lee/escribe en
+// /api/acct-radar/:handle y lanza escaneos manuales. Sin scripts inline (CSP).
+
+(function () {
+  "use strict";
+  if (window.__acctRadarReady) return;
+  window.__acctRadarReady = true;
+
+  function $(id) { return document.getElementById(id); }
+
+  function handle() {
+    var input = $("acctHandle") || $("acctSearchInput");
+    var v = input ? String(input.value || "").trim().replace(/^@/, "") : "";
+    return v.toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+  }
+
+  function msg(text, isError) {
+    var box = $("radarBox"), m = $("radarMsg");
+    if (!box || !m) return;
+    m.textContent = text;
+    m.style.color = isError ? "#ff9c9c" : "#9cc3ff";
+    box.style.display = "block";
+  }
+  function hideBox() { var b = $("radarBox"); if (b) b.style.display = "none"; }
+
+  function apiGet(url) {
+    return fetch(url, { headers: { Accept: "application/json" } }).then(function (r) {
+      return r.json().then(function (d) { if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status)); return d; });
+    });
+  }
+  function apiPost(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      return r.json().then(function (d) { if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status)); return d; });
+    });
+  }
+
+  function fill(profile) {
+    var c = profile.config || {};
+    var aff = c.affiliate || {};
+    if ($("radarKeywords")) $("radarKeywords").value = (c.keywords || []).join("\n");
+    if ($("radarMax")) $("radarMax").value = c.maxPerDay || 20;
+    if ($("radarLang")) $("radarLang").value = c.language === "es" ? "es" : "en";
+    if ($("radarEvery")) $("radarEvery").value = c.everyMinutes || 60;
+    if ($("radarOnlyLinks")) $("radarOnlyLinks").checked = Boolean(c.onlyLinks);
+    if ($("radarAmazon")) $("radarAmazon").value = aff.amazon || "";
+    if ($("radarEbay")) $("radarEbay").value = aff.ebay || "";
+    if ($("radarTarget")) $("radarTarget").value = aff.target || "";
+    if ($("radarBadge")) {
+      $("radarBadge").textContent = (profile.publishedToday || 0) + " / " + (profile.maxPerDay || c.maxPerDay || 20) + " hoy";
+      $("radarBadge").className = "status-badge" + (profile.publishedToday ? " success" : "");
+    }
+  }
+
+  function renderHistory(profile) {
+    var box = $("radarHistory");
+    if (!box) return;
+    var items = (profile.history || []);
+    if (!items.length) { box.innerHTML = '<p class="form-hint" style="margin:0;">Aun no ha publicado nada el radar.</p>'; return; }
+    box.innerHTML = items.map(function (h) {
+      var links = (h.affiliate || []).map(function (a) { return a.store; }).join(", ");
+      return '<div style="padding:8px 10px; border-radius:8px; background:#0f1622; border:1px solid #1e2a3d; margin-bottom:6px;">'
+        + '<div style="font-size:11px; color:#7f93ad; margin-bottom:3px;">' + (h.keyword || "") + (links ? " · afiliado: " + links : "") + '</div>'
+        + '<div style="font-size:13px; color:#d7e3f4; white-space:pre-wrap;">' + String(h.text || "").replace(/</g, "&lt;") + '</div>'
+        + '</div>';
+    }).join("");
+  }
+
+  function refresh() {
+    var h = handle();
+    if (!h) return Promise.resolve();
+    return apiGet("/api/acct-radar/" + encodeURIComponent(h)).then(function (d) {
+      fill(d.profile || {});
+      renderHistory(d.profile || {});
+    }).catch(function (e) { msg("No se pudo cargar el radar: " + e.message, true); });
+  }
+
+  function save() {
+    var h = handle();
+    if (!h) { msg("Analiza o selecciona una cuenta primero.", true); return Promise.resolve(); }
+    var body = {
+      keywords: $("radarKeywords") ? $("radarKeywords").value : "",
+      maxPerDay: $("radarMax") ? Number($("radarMax").value) : 20,
+      language: $("radarLang") ? $("radarLang").value : "en",
+      everyMinutes: $("radarEvery") ? Number($("radarEvery").value) : 60,
+      onlyLinks: $("radarOnlyLinks") ? $("radarOnlyLinks").checked : false,
+      affiliate: {
+        amazon: $("radarAmazon") ? $("radarAmazon").value : "",
+        ebay: $("radarEbay") ? $("radarEbay").value : "",
+        target: $("radarTarget") ? $("radarTarget").value : "",
+      },
+    };
+    return apiPost("/api/acct-radar/" + encodeURIComponent(h), body).then(function (d) {
+      fill(d.profile || {});
+      return d;
+    });
+  }
+
+  function runNow(dry) {
+    var h = handle();
+    if (!h) { msg("Analiza o selecciona una cuenta primero.", true); return Promise.resolve(); }
+    msg(dry ? "Buscando noticias (sin publicar)..." : "Escaneando y publicando... esto puede tardar varios minutos.", false);
+    return save().then(function () {
+      return apiPost("/api/acct-radar/" + encodeURIComponent(h) + "/now", { dryRun: Boolean(dry) });
+    }).then(function (d) {
+      var r = d.result || {};
+      var pubs = (r.published || []);
+      if (dry) {
+        msg(pubs.length ? ("Encontrado " + pubs.length + " candidato(s). Ejemplo: " + (pubs[0].text || "")) : "No se encontro ninguna noticia nueva para tus temas.", false);
+      } else {
+        msg(pubs.length ? ("Publicado(s) " + pubs.length + " post(s) desde el radar.") : "No se publico nada nuevo (todo visto o sin coincidencias).", false);
+      }
+      fill(d.profile || {});
+      renderHistory(d.profile || {});
+    }).catch(function (e) { msg("Error del radar: " + e.message, true); });
+  }
+
+  function stop() {
+    var h = handle();
+    if (!h) { msg("Analiza o selecciona una cuenta primero.", true); return Promise.resolve(); }
+    return apiPost("/api/acct-radar/" + encodeURIComponent(h) + "/stop", {})
+      .then(function (d) { msg("Radar detenido. No publicara nada mas hoy.", false); fill(d.profile || {}); })
+      .catch(function (e) { msg(e.message, true); });
+  }
+
+  function boot() {
+    if (!$("radarCard")) return;
+    var b;
+    if ((b = $("radarSave"))) b.addEventListener("click", function () { save().then(function () { msg("Ajustes del radar guardados.", false); }).catch(function (e) { msg(e.message, true); }); });
+    if ((b = $("radarScan"))) b.addEventListener("click", function () { runNow(true); });
+    if ((b = $("radarRun"))) b.addEventListener("click", function () { runNow(false); });
+    if ((b = $("radarStop"))) b.addEventListener("click", function () { stop(); });
+    window.__acctRadarRefresh = refresh;
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();

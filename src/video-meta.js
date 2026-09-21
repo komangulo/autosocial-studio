@@ -49,16 +49,16 @@ function normalizeTagList(value) {
 }
 
 /**
+ * META-DESC-ONLY-v1
  * Build the companion metadata object from a yt-dlp info.json payload.
- * Prefers explicit fields, falls back to hashtags embedded in the text.
+ * TikTok no tiene titulo: la descripcion trae el texto completo y los
+ * hashtags. El "title" de yt-dlp viene truncado con "..." y los "tags"
+ * repetirian lo que ya esta en la descripcion, asi que se descartan.
+ * Shape: { description, caption }
  */
 function metaFromInfoJson(info = {}) {
-  const title = String(info.title || info.fulltitle || "").trim();
   const description = String(info.description || "").trim();
-  const explicitTags = normalizeTagList(info.tags || info.hashtags || []);
-  const hashtags = explicitTags.length ? explicitTags : extractHashtags(`${title} ${description}`);
-  const caption = buildCaptionFromMeta({ title, description, hashtags });
-  return { title, description, hashtags, caption };
+  return { description, caption: buildCaptionFromMeta({ description }) };
 }
 
 function parseTranslationJson(text) {
@@ -127,7 +127,10 @@ async function callOpenRouterTranslation(apiKey, prompt) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-/** Translate title and description to Spanish while preserving hashtags. */
+/**
+ * TRANS-DESC-ONLY
+ * Translate the description to Spanish while preserving hashtags.
+ */
 async function translateMetaToSpanish(meta, {
   apiKey = "",
   paidApiKey = "",
@@ -136,14 +139,12 @@ async function translateMetaToSpanish(meta, {
   logger = null,
 } = {}) {
   const original = {
-    title: String(meta.title || "").trim(),
     description: String(meta.description || "").trim(),
-    hashtags: normalizeTagList(meta.hashtags || []),
   };
   const prompt = [
-    "Traduce los campos title y description al espanol.",
-    "Conserva los hashtags exactamente sin cambios, incluidos los que aparecen dentro del titulo y la descripcion.",
-    "Devuelve exactamente este JSON: {\"title\":\"\",\"description\":\"\",\"hashtags\":[\"\"]}",
+    "Traduce el campo description al espanol.",
+    "Conserva los hashtags exactamente sin cambios.",
+    "Devuelve exactamente este JSON: {\"description\":\"\"}",
     JSON.stringify(original),
   ].join("\n");
 
@@ -157,13 +158,10 @@ async function translateMetaToSpanish(meta, {
   for (const request of providers) {
     try {
       const translated = parseTranslationJson(await request());
-      const title = preserveTitleHashtags(translated.title || original.title, original.title);
       const description = preserveHashtagsInText(translated.description || original.description, original.description);
       const result = {
-        title,
         description,
-        hashtags: original.hashtags,
-        caption: buildCaptionFromMeta({ title, description, hashtags: original.hashtags }),
+        caption: buildCaptionFromMeta({ description }),
       };
       logger?.("Metadatos traducidos al espanol para Auto Post.");
       return result;
@@ -197,7 +195,7 @@ async function writeMetaFromInfoJson(videoPath, { logger = null, language = "ori
   const metaPath = metaJsonPathFor(videoPath);
   try {
     await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), "utf8");
-    logger?.(`Wrote metadata: ${path.basename(metaPath)} (title, description, ${meta.hashtags.length} hashtag(s))`);
+    logger?.(`Wrote metadata: ${path.basename(metaPath)} (description)`);
     return meta;
   } catch (error) {
     logger?.(`Could not write ${path.basename(metaPath)}: ${error.message}`, "error");

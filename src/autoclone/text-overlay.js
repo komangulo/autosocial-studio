@@ -15,6 +15,76 @@ const { spawn } = require("child_process");
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const DEEPSEEK_BASE = "https://api.deepseek.com/v1";
+
+// XKR[xkiro-rotacion] inicio - xKiro con rotacion automatica
+const XKIRO_BASE = "https://api.xkiro.com/v1";
+// Orden de preferencia, medido con carga y rafaga reales:
+//   1) MiniMax M3      aguanta 25/25 peticiones seguidas
+//   2) Qwen 3.7 Flash  10/10, respaldo solido
+//   3) Ministral 14B   el mas rapido (329ms)
+//   4) Mistral Small   el mas rapido empatado (336ms)
+const XKIRO_MODELS = [
+  "minimax/minimax-m3:free",
+  "qwen/qwen3.7-flash:free",
+  "mistralai/ministral-14b",
+  "mistralai/mistral-small-2603",
+];
+// Segundos de cuarentena para un modelo que acaba de fallar.
+const XKIRO_COOLDOWN_MS = 15000;
+// Espera antes de reintentar cuando los 4 han fallado.
+const XKIRO_ALL_FAILED_MS = 8000;
+const XKIRO_MAX_ROUNDS = 3;
+
+// XKI[indicador][state] inicio - modelo activo de TODA la cadena
+// Se actualiza en cada intento, venga de xKiro, DeepSeek, Gemini u OpenRouter.
+// Sirve para que la app pueda decir en todo momento que modelo trabaja.
+const __modeloActivo = {
+  modelo: "",            // id completo, p.ej. "minimax/minimax-m3:free"
+  corto: "",             // nombre legible
+  proveedor: "",         // "xKiro" | "DeepSeek" | "Gemini" | "OpenRouter"
+  detalle: "",           // texto largo para la interfaz
+  desde: 0,               // cuando empezo este modelo (ms)
+  lote: 0,                // lote de fotogramas actual
+  totalLotes: 0,
+  historial: [],          // ultimos modelos usados
+};
+if (typeof globalThis !== "undefined") globalThis.__modeloActivo = __modeloActivo;
+
+/** Marca que modelo esta trabajando ahora mismo. */
+function marcarModelo(proveedor, modelo, { detalle = "", lote = 0, totalLotes = 0 } = {}) {
+  const s = globalThis.__modeloActivo || __modeloActivo;
+  const corto = String(modelo || "").split("/").pop() || modelo || "";
+  const cambio = s.modelo !== modelo;
+  s.modelo = modelo || "";
+  s.corto = corto;
+  s.proveedor = proveedor || "";
+  s.detalle = detalle || `${proveedor} usando ${corto}`;
+  s.desde = Date.now();
+  s.lote = lote;
+  s.totalLotes = totalLotes;
+  if (cambio) {
+    s.historial.unshift({ proveedor, modelo: modelo || "", corto, at: new Date().toISOString() });
+    if (s.historial.length > 12) s.historial.length = 12;
+  }
+  return s;
+}
+
+/** Estado del modelo activo, para la app. */
+function modelActivity() {
+  const s = globalThis.__modeloActivo || __modeloActivo;
+  return {
+    modelo: s.modelo,
+    corto: s.corto,
+    proveedor: s.proveedor,
+    detalle: s.detalle,
+    segundos: s.desde ? Math.round((Date.now() - s.desde) / 1000) : 0,
+    lote: s.lote,
+    totalLotes: s.totalLotes,
+    historial: s.historial.slice(0, 12),
+  };
+}
+// XKI[indicador][state] fin
+// XKR[xkiro-rotacion] fin
 const DEEPSEEK_MODEL = "deepseek-flash"; // DS[consts]
 const DEFAULT_VISION_MODEL = "gemini-3.6-flash";
 // Free-tier key: only these (gemini-2.5-flash is what the free quota covers).
@@ -268,6 +338,99 @@ async function callOpenRouterVision(apiKey, model, frameParts, videoWidth, video
   return data.choices?.[0]?.message?.content || "";
 }
 
+// XKR[xkiro-rotacion] call - formato OpenAI
+async function callXKiroVision(apiKey, model, frameParts, videoWidth, videoHeight) {
+  const content = [{ type: "text", text: `Resolucion del video: ${videoWidth}x${videoHeight}. Fotogramas:` }];
+  for (const part of frameParts) {
+    if (part.text) content.push({ type: "text", text: part.text });
+    else if (part.inline_data) content.push({ type: "image_url", image_url: { url: `data:${part.inline_data.mime_type};base64,${part.inline_data.data}` } });
+  }
+  const response = await fetch(`${XKIRO_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: VISION_SYSTEM }, { role: "user", content }],
+      temperature: 0.1,
+      max_tokens: 8192,
+      response_format: { type: "json_object" },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.error?.message || `xKiro respondio ${response.status}`;
+    const error = new Error(message);
+    if (response.status === 429 || /rate limit/i.test(message)) error.code = 429;
+    if (/api key|unauthor|invalid|authentication|permission/i.test(message)) error.code = 401;
+    throw error;
+  }
+  return data.choices?.[0]?.message?.content || "";
+}
+
+// El limite de xKiro es por IP y por minuto. Mantenemos el estado de
+// rotacion FUERA de la funcion, para que se recuerde entre lotes y entre
+// videos: el modelo que funciona se sigue usando, no se vuelve al primero.
+const __xKiroEstado = { indice: 0, cooldown: new Map(), usos: new Map() };
+// Visible para el router, que lo expone en /api/autoclone/xkiro. // XKP[xkiro-panel]
+if (typeof globalThis !== "undefined") globalThis.__xKiroEstado = __xKiroEstado;
+
+/**
+ * Inspecciona los fotogramas con ROTACION entre los modelos de xKiro.
+ * Conserva el modelo activo entre llamadas: solo cambia al siguiente
+ * cuando el actual falla. El que falla descansa y se recupera solo.
+ */
+async function xKiroRotateVision(apiKey, parts, width, height, onProgress) {
+  const estado = __xKiroEstado;
+  let intentos = 0;
+  const maxIntentos = XKIRO_MODELS.length * XKIRO_MAX_ROUNDS;
+
+  while (intentos < maxIntentos) {
+    intentos += 1;
+    // Busca el modelo activo, o el primero disponible tras el.
+    let elegido = null;
+    for (let salto = 0; salto < XKIRO_MODELS.length; salto += 1) {
+      const i = (estado.indice + salto) % XKIRO_MODELS.length;
+      const modelo = XKIRO_MODELS[i];
+      const hasta = estado.cooldown.get(modelo) || 0;
+      if (Date.now() >= hasta) { elegido = modelo; estado.indice = i; break; }
+    }
+
+    // Todos en cuarentena: espera a que el primero se recupere.
+    if (!elegido) {
+      const tiempos = XKIRO_MODELS.map((m) => estado.cooldown.get(m) || 0).filter((t) => t > 0);
+      const proximo = tiempos.length ? Math.min(...tiempos) : 0;
+      const espera = Math.max(1500, Math.min(proximo - Date.now(), XKIRO_ALL_FAILED_MS));
+      onProgress?.({ stage: "text-fallback", detail: `Todos los modelos de xKiro ocupados; esperando ${Math.round(espera / 1000)}s...` });
+      await new Promise((r) => setTimeout(r, espera));
+      continue;
+    }
+
+    try {
+      const corto = elegido.split("/").pop();
+// XKP[xkiro-panel]
+      onProgress?.({ stage: "text-vision", detail: `Leyendo texto con xKiro ${corto} (modelo ${estado.indice + 1}/${XKIRO_MODELS.length})...` });
+      marcarModelo("xKiro", elegido, { detalle: `xKiro ${corto}` }); // XKI[indicador][xkiro]
+      const answer = await callXKiroVision(apiKey, elegido, parts, width, height);
+      if (answer && answer.trim()) {
+        estado.usos.set(elegido, (estado.usos.get(elegido) || 0) + 1);
+        return answer;
+      }
+      // Respuesta vacia: tratamos como fallo suave.
+      estado.cooldown.set(elegido, Date.now() + XKIRO_COOLDOWN_MS);
+    } catch (error) {
+      // Error de clave: no tiene sentido seguir rotando.
+      if (error.code === 401) throw error;
+      // Cualquier otro fallo: cuarentena y siguiente modelo.
+      const seg = error.code === 429 ? 25000 : XKIRO_COOLDOWN_MS;
+      estado.cooldown.set(elegido, Date.now() + seg);
+      const corto = elegido.split("/").pop();
+      onProgress?.({ stage: "text-warning", detail: `xKiro ${corto} fallo (${String(error.message).slice(0, 60)}); rotando al siguiente modelo...` });
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+
+  return null;
+}
 // DeepSeek V4.1 Flash (deepseek-flash): OpenAI-compatible, vision nativa.
 // Cada imagen cuesta como maximo 384 tokens de entrada.
 async function callDeepSeekVision(apiKey, model, frameParts, videoWidth, videoHeight) {
@@ -306,8 +469,8 @@ async function fileToBase64(filePath) { // DS[fn]
  * Detect on-screen text across the whole video and translate it to Spanish.
  * Returns [{ start, end, original, translated, x, y, w, h, confidence }]
  */
-async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidModel = DEFAULT_VISION_MODEL, openRouterKey = "", deepSeekKey = "", model = DEFAULT_VISION_MODEL, workDir, onProgress } = {}) {
-  if (!apiKey && !paidApiKey && !openRouterKey && !deepSeekKey) throw new Error("Falta la API key de IA para leer el texto en pantalla."); // DS[sig]
+async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidModel = DEFAULT_VISION_MODEL, openRouterKey = "", deepSeekKey = "", xKiroKey = "", model = DEFAULT_VISION_MODEL, workDir, onProgress } = {}) {
+  if (!apiKey && !paidApiKey && !openRouterKey && !deepSeekKey && !xKiroKey) throw new Error("Falta la API key de IA para leer el texto en pantalla."); // XKR[xkiro-rotacion]
   const { width, height } = await probeSize(videoPath);
   const frameDir = path.join(workDir, "frames");
   onProgress?.({ stage: "text-frames", detail: "Extrayendo fotogramas para leer el texto..." });
@@ -335,15 +498,35 @@ async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidMode
       parts.push({ inline_data: { mime_type: "image/jpeg", data: await fileToBase64(frame.path) } });
     }
     onProgress?.({ stage: "text-vision", detail: `Leyendo texto en pantalla (${index + batch.length}/${frames.length})...` });
+    // XKI[indicador][lote] registro del lote para el indicador
+    if (globalThis.__modeloActivo) {
+      globalThis.__modeloActivo.lote = index + batch.length;
+      globalThis.__modeloActivo.totalLotes = frames.length;
+    }
     let text = null;
     let lastError = null;
     let quotaHit = false;
+    // El estado vive en __xKiroEstado, fuera del bucle: se conserva entre lotes. // XKR[xkiro-rotacion]
 
+    // 0) xKiro con ROTACION entre 4 modelos gratis. Primera eleccion.
+    //    El resto de la cadena (Gemini gratis -> DeepSeek -> Gemini pago
+    //    -> OpenRouter) queda intacta como respaldo final.
+    if (text === null && xKiroKey) {
+      // XKR[xkiro-rotacion] escalon
+      try {
+        const answer = await xKiroRotateVision(xKiroKey, parts, width, height, onProgress);
+        if (answer && answer.trim()) text = answer;
+      } catch (error) {
+        lastError = error;
+        onProgress?.({ stage: "text-warning", detail: `xKiro no disponible: ${error.message}` });
+      }
+    }
     // 1) Free Gemini key first (gemini-2.5-flash). Once its quota is gone we
     //    remember it and skip it for the rest of this video.
     if (apiKey && !freeQuotaGone) {
       for (const candidate of freeModels) {
         try {
+          marcarModelo("Gemini", candidate, { detalle: `Gemini gratis (${candidate})` }); // XKI[indicador][gemini-free]
           text = await callGeminiVision(apiKey, candidate, parts, width, height);
           if (candidate !== freeModels[0]) model = candidate;
           break;
@@ -366,6 +549,7 @@ async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidMode
         if (answer && answer.trim()) {
           text = answer;
           onProgress?.({ stage: "text-fallback", detail: "Traduciendo con DeepSeek 4.1 Flash..." });
+          marcarModelo("DeepSeek", DEEPSEEK_MODEL, { detalle: "DeepSeek 4.1 Flash" }); // XKI[indicador][deepseek]
         }
       } catch (error) {
         lastError = error;
@@ -378,6 +562,7 @@ async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidMode
     //    for this and every following batch.
     if (text === null && paidApiKey && (quotaHit || freeQuotaGone || !apiKey || lastError)) {
       if (!freeQuotaGone) onProgress?.({ stage: "text-fallback", detail: "Cuota gratis agotada; usando Gemini de pago (gemini-3.6-flash)..." });
+      marcarModelo("Gemini", candidate || DEFAULT_VISION_MODEL, { detalle: "Gemini de pago" }); // XKI[indicador][gemini-pago]
       freeQuotaGone = true;
       const paidModels = [paidModel, "gemini-3.6-flash", "gemini-flash-latest"].filter((m, i, a) => m && a.indexOf(m) === i);
       for (const candidate of paidModels) {
@@ -409,6 +594,7 @@ async function detectAndTranslate(videoPath, { apiKey, paidApiKey = "", paidMode
             if (answer && answer.trim()) {
               text = answer;
               onProgress?.({ stage: "text-fallback", detail: `Traduciendo con OpenRouter (${orModel})...` });
+              marcarModelo("OpenRouter", orModel, { detalle: `OpenRouter (${orModel})` }); // XKI[indicador][openrouter]
             }
             break;
           } catch (error) {
@@ -953,6 +1139,33 @@ module.exports = {
   probeSize,
   DEFAULT_VISION_MODEL,
   OPENROUTER_VISION_MODELS,
+  XKIRO_BASE, XKIRO_MODELS, xKiroVision: callXKiroVision, xKiroRotateVision,
+  xKiroRotateStatus,
+  modelActivity, // XKI[indicador][export]
   isQuotaError,
   callOpenRouterVision,
 };
+
+/** Resumen del estado de la rotacion de xKiro, para mostrarlo en la app. */
+function xKiroRotateStatus() {
+  const estado = globalThis.__xKiroEstado;
+  if (!estado) return { ok: false, activo: "", indice: 0, modelos: [] };
+  const ahora = Date.now();
+  const modelos = XKIRO_MODELS.map((id, i) => ({
+    id,
+    corto: id.split("/").pop(),
+    usos: estado.usos.get(id) || 0,
+    enEspera: (estado.cooldown.get(id) || 0) > ahora,
+    esperaSeg: Math.max(0, Math.ceil(((estado.cooldown.get(id) || 0) - ahora) / 1000)),
+    activo: i === estado.indice,
+  }));
+  return {
+    ok: true,
+    activo: XKIRO_MODELS[estado.indice] || "",
+    corto: (XKIRO_MODELS[estado.indice] || "").split("/").pop(),
+    indice: estado.indice,
+    totalUsos: modelos.reduce((s, m) => s + m.usos, 0),
+    modelos,
+  };
+}
+

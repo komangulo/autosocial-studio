@@ -1,0 +1,35 @@
+// TSAFE-RADAR-HELPER: capa de decision TypeSafe (System One / Jev).
+// El codigo manda; Jev solo juzga. Si no esta o falla, devuelve null y el
+// radar sigue con su comportamiento anterior (nunca se rompe por TypeSafe).
+async function typesafeRelevance(post, keywords, cfg) {
+  try {
+    const ts = require("./typesafe");
+    if (!ts.configured || !ts.configured()) return null;
+    return await ts.decide("radar_relevance", {
+      tweet: String(post.text || "").slice(0, 1500),
+      temas: keywords,
+      idioma_preferido: cfg.language === "en" ? "en" : "es",
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function typesafeAffiliateStore(rawUrl, text, cfg) {
+  try {
+    const ts = require("./typesafe");
+    if (!ts.configured || !ts.configured()) return null;
+    const stores = [];
+    if (cfg.affiliate && cfg.affiliate.amazon) stores.push("amazon");
+    if (cfg.affiliate && cfg.affiliate.ebay) stores.push("ebay");
+    if (cfg.affiliate && cfg.affiliate.target) stores.push("target");
+    if (!stores.length) return null;
+    return await ts.decide("radar_affiliate", {
+      url: rawUrl,
+      texto_del_link: String(text || "").slice(0, 300),
+      tiendas: stores,
+    });
+  } catch {
+    return null;
+  }
+}

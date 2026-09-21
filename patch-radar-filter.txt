@@ -1,0 +1,11 @@
+
+        // TSAFE-RADAR-FILTER: si TypeSafe esta disponible, juzga de verdad si el
+        // tweet es una noticia publicable antes de gastar una reescritura.
+        const tsRelevance = await typesafeRelevance(post, keywords, cfg);
+        if (tsRelevance && tsRelevance.verdict) {
+          scan.typesafe = (scan.typesafe || 0) + 1;
+          if (!tsRelevance.verdict.ok) {
+            skipped.push({ id, why: `typesafe:${tsRelevance.verdict.reason}`, ts: tsRelevance.verdict.scores });
+            continue;
+          }
+        }

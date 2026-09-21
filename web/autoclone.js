@@ -27,6 +27,9 @@
     keyBadge: $("autocloneKeyBadge"),
     barFill: $("autocloneBarFill"),
     stage: $("autocloneStage"),
+    modeloActivo: $("autocloneModeloActivo"), // XKI[indicador][els]
+    modeloDetalle: $("autocloneModeloDetalle"),
+    modeloHistorial: $("autocloneModeloHistorial"),
     videos: $("autocloneVideos"),
     analysis: $("autocloneAnalysis"),
     destination: $("autocloneDestination"),
@@ -35,6 +38,9 @@
     deepSeekKey: $("autocloneDeepSeekKey"),
     saveDeepSeekKeyBtn: $("autocloneSaveDeepSeekKeyBtn"),
     deepSeekStatus: $("autocloneDeepSeekStatus"), // DS[ui-els]
+    xKiroKey: $("autocloneXKiroKey"), // XKC[js][els]
+    saveXKiroKeyBtn: $("autocloneSaveXKiroKeyBtn"),
+    xKiroStatus: $("autocloneXKiroStatus"),
   };
   if (!els.startBtn) return;
 
@@ -118,6 +124,46 @@
     els.barFill.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
   }
 
+  // XKI[indicador][poll] inicio - preguntar al backend que modelo va
+  let modeloPollTimer = null;
+  async function refrescarModelo() {
+    if (!els.modeloActivo) return;
+    try {
+      const d = await API.get("/api/autoclone/modelo");
+      const prov = d.proveedor || "—";
+      const corto = d.corto || "";
+      const provEl = els.modeloActivo.querySelector(".autoclone-modelo-prov");
+      const idEl = els.modeloActivo.querySelector(".autoclone-modelo-id");
+      if (provEl) provEl.textContent = prov;
+      if (idEl) idEl.textContent = corto || "Sin actividad";
+      els.modeloActivo.classList.toggle("activo", Boolean(d.modelo));
+      els.modeloActivo.classList.toggle("es-deepseek", prov === "DeepSeek");
+      els.modeloActivo.classList.toggle("es-xkiro", prov === "xKiro");
+      els.modeloActivo.classList.toggle("es-gemini", prov === "Gemini");
+      if (els.modeloDetalle) {
+        els.modeloDetalle.textContent = d.modelo
+          ? `${d.detalle || prov} · hace ${d.segundos}s` + (d.totalLotes ? ` · lote ${d.lote}/${d.totalLotes}` : "")
+          : "Sin actividad. Cuando empiece el trabajo, vera aqui el modelo en uso.";
+      }
+      if (els.modeloHistorial) {
+        const h = (d.historial || []).slice(0, 6);
+        els.modeloHistorial.innerHTML = h.length
+          ? h.map(x => `<span class="autoclone-chip">${x.proveedor}: ${escapeHtmlJs(x.corto)}</span>`).join("")
+          : "";
+      }
+    } catch { /* si falla, no molestamos */ }
+  }
+  function escapeHtmlJs(s) { return String(s == null ? "" : s).replace(/[&<>\"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[c])); }
+  function iniciarIndicadorModelo() {
+    if (modeloPollTimer) return;
+    refrescarModelo();
+    modeloPollTimer = setInterval(refrescarModelo, 1000);
+  }
+  function pararIndicadorModelo() {
+    if (modeloPollTimer) { clearInterval(modeloPollTimer); modeloPollTimer = null; }
+  }
+  // XKI[indicador][poll] fin
+
   async function refreshKeyState() {
     try {
       const data = await API.get("/api/competitor/settings");
@@ -135,6 +181,12 @@
           ? `DeepSeek configurado (${data.settings?.deepSeekKeyMasked || "oculta"}).`
           : "DeepSeek sin configurar.";
       } // DS[ui-state]
+
+      if (els.xKiroStatus) { // XKC[js][render]
+        els.xKiroStatus.textContent = data.settings?.hasXKiroKey
+          ? `xKiro configurado (${data.settings?.xKiroKeyMasked || "oculta"}). Rotacion activa en AutoClone.`
+          : "xKiro sin configurar. AutoClone usara Gemini directamente.";
+      }
       return hasKey;
     } catch {
       els.keyBadge.textContent = "Sin API de IA";
@@ -155,6 +207,21 @@
       els.keyStatus.textContent = error.message;
     } finally {
       els.saveKeyBtn.disabled = false;
+    }
+  }
+
+  async function saveXKiroKey() { // XKC[js][func]
+    const key = els.xKiroKey.value.trim();
+    if (!key) { els.xKiroStatus.textContent = "Escribe la API key de xKiro."; return; }
+    els.saveXKiroKeyBtn.disabled = true;
+    try {
+      await API.post("/api/competitor/settings", { xKiroApiKey: key });
+      els.xKiroKey.value = "";
+      els.xKiroStatus.textContent = "API key de xKiro guardada.";
+    } catch (error) {
+      els.xKiroStatus.textContent = error.message;
+    } finally {
+      els.saveXKiroKeyBtn.disabled = false;
     }
   }
 
@@ -240,6 +307,9 @@
       if (progress.detail) els.stage.textContent = progress.detail;
       if (typeof progress.percent === "number") setBar(progress.percent);
       const running = !["idle", "done", "error", "cancelled"].includes(progress.stage);
+      if (typeof iniciarIndicadorModelo === "function") {
+        if (running) iniciarIndicadorModelo(); else pararIndicadorModelo();
+      } // XKI[indicador][bind]
       els.cancelBtn.hidden = !running;
       els.startBtn.disabled = running;
       if (progress.stage === "done" || progress.stage === "error" || progress.stage === "cancelled") {
@@ -372,6 +442,7 @@
   els.keyBtn.addEventListener("click", () => { els.keyPanel.hidden = !els.keyPanel.hidden; });
   els.saveKeyBtn.addEventListener("click", saveKey);
   els.saveDeepSeekKeyBtn?.addEventListener("click", saveDeepSeekKey); // DS[ui-bind]
+  els.saveXKiroKeyBtn?.addEventListener("click", saveXKiroKey); // XKC[js][bind]
   els.username.addEventListener("keydown", (event) => { if (event.key === "Enter") start(); });
   els.openFolderBtn?.addEventListener("click", openFolder);
   els.resetHistoryBtn?.addEventListener("click", resetHistory);
@@ -390,6 +461,7 @@
         if (data.progress?.detail) els.stage.textContent = data.progress.detail;
         if (typeof data.progress?.percent === "number") setBar(data.progress.percent);
         if (data.running) connectEvents();
+      if (typeof iniciarIndicadorModelo === "function") iniciarIndicadorModelo(); // XKI[indicador][start]
       }).catch(() => {});
     }
   });

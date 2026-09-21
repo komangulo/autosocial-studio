@@ -9,6 +9,143 @@
  */
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+// XKA[analisis][motor] inicio - xKiro para el analisis de perfil
+// xKiro es OpenAI-compatible. Estos son modelos GRATIS con vision,
+// ordenados por fiabilidad medida. Si uno falla, rota al siguiente.
+const XKIRO_BASE = "https://api.xkiro.com/v1";
+const XKIRO_ANALYSIS_MODELS = [
+  "minimax/minimax-m3:free",
+  "qwen/qwen3.7-flash:free",
+  "qwen/qwen3-vl-plus:free",
+  "qwen/qwen3.5-flash:free",
+  "mistralai/ministral-14b",
+  "mistralai/mistral-small-2603",
+  "qwen/qwen3.6-plus:free",
+  "qwen/qwen3.7-plus:free",
+];
+const XKIRO_ANALYSIS_COOLDOWN_MS = 15000;
+const __xKiroAnalisis = { indice: 0, cooldown: new Map() };
+if (typeof globalThis !== "undefined") globalThis.__xKiroAnalisis = __xKiroAnalisis;
+
+/**
+ * Llama a xKiro en el formato del analista.
+ * parts: [{ text } | { inline_data: { mime_type, data } }]
+ */
+async function callXKiro(apiKey, model, parts) {
+  const content = [];
+  for (const part of parts) {
+    if (part.text) content.push({ type: "text", text: part.text });
+    else if (part.inline_data) {
+      content.push({ type: "image_url", image_url: { url: `data:${part.inline_data.mime_type};base64,${part.inline_data.data}` } });
+    }
+  }
+  const response = await fetch(`${XKIRO_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+      temperature: 0.4,
+      max_tokens: 8192,
+      response_format: { type: "json_object" },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.error?.message || `xKiro respondio ${response.status}`;
+    const error = new Error(message);
+    if (response.status === 429 || /rate limit|high demand|demand/i.test(message)) error.code = 429;
+    if (/api key|unauthor|invalid|authentication|permission|premium|deposited balance/i.test(message)) error.code = 401;
+    throw error;
+  }
+  const text = data.choices?.[0]?.message?.content || "";
+  if (!text.trim()) throw new Error("xKiro devolvio una respuesta vacia.");
+  return { text, usage: data.usage || null, model };
+}
+
+/**
+ * Analiza el perfil con xKiro, rotando entre modelos gratis.
+ * Devuelve { analysis, usage, model } o lanza si todos fallan.
+ */
+async function analyzeWithXKiro(xKiroKey, parts, onProgress) {
+  const estado = globalThis.__xKiroAnalisis || __xKiroAnalisis;
+  const ahora = Date.now();
+  const total = XKIRO_ANALYSIS_MODELS.length;
+  let ultimoError = null;
+
+  for (let ronda = 0; ronda < 2; ronda += 1) {
+    for (let n = 0; n < total; n += 1) {
+      const i = (estado.indice + n) % total;
+      const modelo = XKIRO_ANALYSIS_MODELS[i];
+      const corto = modelo.split("/").pop();
+      if ((estado.cooldown.get(modelo) || 0) > Date.now()) continue;
+      try {
+        onProgress?.({ stage: "analysis", detail: `Analizando perfil con xKiro ${corto} (${i + 1}/${total})...` });
+        const r = await callXKiro(xKiroKey, modelo, parts);
+        estado.indice = i;
+        return { analysis: parseJsonResponse(r.text), usage: r.usage, model: `xKiro/${corto}` };
+      } catch (error) {
+        ultimoError = error;
+        if (error.code === 401) throw error; // clave invalida: no insistir
+        estado.cooldown.set(modelo, Date.now() + XKIRO_ANALYSIS_COOLDOWN_MS);
+        estado.indice = (i + 1) % total;
+        onProgress?.({ stage: "analysis", detail: `xKiro ${corto} fallo; probando el siguiente modelo...` });
+      }
+    }
+    if (ronda === 0) await new Promise((r) => setTimeout(r, 5000));
+  }
+  throw ultimoError || new Error("Ningun modelo de xKiro pudo con el analisis.");
+}
+// XKA[analisis][motor] fin
+
+// DSA[analisis][motor] inicio - DeepSeek 4.1 Flash para el analisis
+// OpenAI-compatible, vision nativa. ~6.7x mas barato que Gemini de pago.
+const DEEPSEEK_BASE = "https://api.deepseek.com/v1";
+const DEEPSEEK_ANALYSIS_MODEL = "deepseek-flash";
+
+/**
+ * Llama a DeepSeek en el formato del analista.
+ * parts: [{ text } | { inline_data: { mime_type, data } }]
+ */
+async function callDeepSeek(apiKey, model, parts) {
+  const content = [];
+  for (const part of parts) {
+    if (part.text) content.push({ type: "text", text: part.text });
+    else if (part.inline_data) {
+      content.push({ type: "image_url", image_url: { url: `data:${part.inline_data.mime_type};base64,${part.inline_data.data}` } });
+    }
+  }
+  const response = await fetch(`${DEEPSEEK_BASE}/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: model || DEEPSEEK_ANALYSIS_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content },
+      ],
+      temperature: 0.4,
+      max_tokens: 8192,
+      response_format: { type: "json_object" },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data.error?.message || `DeepSeek respondio ${response.status}`;
+    const error = new Error(message);
+    if (response.status === 429 || /rate limit|quota|high demand/i.test(message)) error.code = 429;
+    if (/api key|unauthor|invalid|authentication|permission|insufficient|balance/i.test(message)) error.code = 401;
+    throw error;
+  }
+  const text = data.choices?.[0]?.message?.content || "";
+  if (!text.trim()) throw new Error("DeepSeek devolvio una respuesta vacia.");
+  return { text, usage: data.usage || null, model: model || DEEPSEEK_ANALYSIS_MODEL };
+}
+// DSA[analisis][motor] fin
+
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "gemini-3.6-flash";
 // Free vision models on OpenRouter used when Gemini runs out of quota.
@@ -141,7 +278,9 @@ async function callGemini(apiKey, model, parts, { temperature = 0.4, maxOutputTo
 
 /** Detect an out-of-quota failure from Gemini. */
 function isQuotaError(error) {
-  return /cuota|quota|rate.?limit|exceeded|429/i.test(String(error?.message || ""));
+  // DSA[analisis][quota] Google devuelve 'high demand' / 'overloaded' cuando la cuota
+  // esta agotada, y no incluia esas palabras: por eso reintentaba en vano.
+  return /cuota|quota|rate.?limit|exceeded|429|high demand|overloaded|temporarily|try again later|unavailable/i.test(String(error?.message || ""));
 }
 
 /**
@@ -211,14 +350,30 @@ async function analyzeWithOpenRouter(apiKey, report, { brand = "", language = "e
  * @param {object} options { apiKey, model, brand, language, frames }
  *   frames: [{ videoId, imageBase64, mimeType }]
  */
-async function analyze(report, { apiKey, paidApiKey = "", paidModel = DEFAULT_MODEL, openRouterKey = "", model = DEFAULT_MODEL, brand = "", language = "es", frames = [] } = {}) {
-  if (!apiKey && !paidApiKey && !openRouterKey) throw new Error("Falta la API key de IA. Añádela en la sección Competencia.");
+async function analyze(report, { apiKey, paidApiKey = "", paidModel = DEFAULT_MODEL, openRouterKey = "", xKiroKey = "", deepSeekKey = "", model = DEFAULT_MODEL, brand = "", language = "es", frames = [], onProgress = null } = {}) { // DSA[analisis][firma] // XKA[analisis][firma]
+  if (!apiKey && !paidApiKey && !openRouterKey && !xKiroKey && !deepSeekKey) throw new Error("Falta la API key de IA. Añádela en la sección Competencia."); // XKA[analisis][firma]
+  let deepSeekDown = false; // DSA[analisis][paso2]
   const parts = [{ text: buildUserPrompt(report, { brand, language }).replace(/\nDatos reales:/, "\nFotogramas adjuntos de los vídeos más vistos: " + frames.length + "\nDatos reales:") }];
 
   // Attach up to 12 frames (4 per top video) as inline images.
   for (const frame of frames.slice(0, 12)) {
     parts.push({ text: `Fotograma del vídeo ${frame.videoId}:` });
     parts.push({ inline_data: { mime_type: frame.mimeType || "image/jpeg", data: frame.imageBase64 } });
+  }
+
+  // 0) xKiro con rotacion entre modelos GRATIS con vision. Primer intento. // XKA[analisis][paso0]
+  //    Antes que Gemini, para no depender de su cuota gratuita.
+  if (xKiroKey) {
+    try {
+      return await analyzeWithXKiro(xKiroKey, parts, onProgress);
+    } catch (error) {
+      const esClave = error.code === 401 || /api key|unauthor|invalid|premium|deposited/i.test(String(error.message));
+      if (esClave) {
+        onProgress?.({ stage: "analysis", detail: `xKiro no usable (${String(error.message).slice(0, 80)}); usando Gemini...` });
+      } else {
+        onProgress?.({ stage: "analysis", detail: `xKiro no disponible (${String(error.message).slice(0, 80)}); usando Gemini...` });
+      }
+    }
   }
 
   // 1) Free key (gemini-2.5-flash) first.
@@ -237,6 +392,21 @@ async function analyze(report, { apiKey, paidApiKey = "", paidModel = DEFAULT_MO
           if (!isQuotaError(inner)) throw inner;
         }
       }
+    }
+  }
+
+  // 2) DeepSeek 4.1 Flash (deepseek-flash) - pago, con vision nativa y
+  //    ~6.7x mas barato que Gemini de pago. Se usa cuando la cuota gratis
+  //    de Gemini se agota. Despues caen Gemini de pago y OpenRouter.
+  if (deepSeekKey && !deepSeekDown) { // DSA[analisis][paso2]
+    try {
+      onProgress?.({ stage: "analysis", detail: "Cuota gratis agotada; usando DeepSeek 4.1 Flash..." });
+      const r = await callDeepSeek(deepSeekKey, DEEPSEEK_ANALYSIS_MODEL, parts);
+      return { analysis: parseJsonResponse(r.text), usage: r.usage, model: "DeepSeek 4.1 Flash" };
+    } catch (error) {
+      const esClave = error.code === 401 || /api key|unauthor|invalid|balance|insufficient/i.test(String(error.message));
+      if (esClave) deepSeekDown = true;
+      onProgress?.({ stage: "analysis", detail: `DeepSeek no pudo (${String(error.message).slice(0, 80)}); probando Gemini de pago...` });
     }
   }
 

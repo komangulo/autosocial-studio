@@ -36,6 +36,26 @@ function createAutoCloneRouter(express, context = {}) {
     res.json({ ok: true, running: controller.running, jobId: controller.jobId });
   }));
 
+  // Que modelo de xKiro esta trabajando ahora mismo. // XKP[xkiro-panel]
+  router.get("/xkiro", route(async (req, res) => {
+    try {
+      const { xKiroRotateStatus } = require("./text-overlay");
+      res.json({ ok: true, ...xKiroRotateStatus() });
+    } catch (error) {
+      res.json({ ok: false, activo: "", indice: 0, modelos: [], error: error.message });
+    }
+  }));
+
+  // Que modelo de la cadena esta trabajando ahora mismo. // XKI[indicador][ruta]
+  router.get("/modelo", route(async (req, res) => {
+    try {
+      const { modelActivity } = require("./text-overlay");
+      res.json({ ok: true, ...modelActivity() });
+    } catch (error) {
+      res.json({ ok: false, modelo: "", corto: "", proveedor: "", detalle: "", historial: [], error: error.message });
+    }
+  }));
+
   router.get("/progress", route(async (req, res) => {
     res.json({ ok: true, progress: controller.getProgress(), running: controller.running });
   }));
@@ -137,7 +157,9 @@ function createAutoCloneRouter(express, context = {}) {
       items.push({
         name: path.basename(videoPath),
         hasMeta: Boolean(meta),
-        title: meta?.title || "",
+        // META-DESC-ONLY-LIST: TikTok no tiene titulo; mostramos la descripcion.
+        title: meta?.description || "",
+        description: meta?.description || "",
       });
     }
     res.json({

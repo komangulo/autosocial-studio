@@ -1,0 +1,15 @@
+        // TSAFE-RADAR-AFF: si la deteccion por dominio falla, TypeSafe decide la tienda
+        // (links acortados o dominios raros) antes de descartar el link.
+        for (const raw of extractUrls(post.text)) {
+          let res = affiliateUrlFor(raw, cfg);
+          if ((!res || !res.applied) && !detectStore(raw)) {
+            const guessed = await typesafeAffiliateStore(raw, post.text, cfg);
+            if (guessed && guessed.verdict && guessed.verdict.ok && guessed.verdict.store) {
+              res = affiliateUrlFor(raw, {
+                ...cfg,
+                affiliate: { ...cfg.affiliate, __store: guessed.verdict.store },
+              });
+            }
+          }
+          if (res && res.applied) affLinks.push(res);
+        }

@@ -66,3 +66,8 @@ queue/**/*.txt
 
 # Per-account cookies exported for yt-dlp (live sessions)
 .runtime/cookies/
+
+# MARKER: XAP-IGNORE-v1
+x-autopilot-state.json
+x-autopilot-state.json.tmp
+.runtime/cookies

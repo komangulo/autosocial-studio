@@ -1,0 +1,7 @@
+
+    // TSAFE-XAP-CALL: control de calidad TypeSafe antes de dar el texto por bueno.
+    const tsQuality = await typesafeQuality(item, clean);
+    if (tsQuality && tsQuality.verdict && !tsQuality.verdict.ok) {
+      log(item, `TypeSafe bloqueo el texto (${tsQuality.verdict.reason}); se descarta.`, "error");
+      throw new Error(`TypeSafe: calidad insuficiente (${tsQuality.verdict.reason}).`);
+    }

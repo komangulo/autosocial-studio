@@ -224,11 +224,14 @@ const UI = {
     xWorkerBadge: document.getElementById("xWorkerBadge"),
     xUsername: document.getElementById("xUsername"), xPostsPerDay: document.getElementById("xPostsPerDay"),
     xDailyTimes: document.getElementById("xDailyTimes"), xPostingMode: document.getElementById("xPostingMode"), xAccountTier: document.getElementById("xAccountTier"), xContentMode: document.getElementById("xContentMode"), xSearchTopic: document.getElementById("xSearchTopic"),
-    xMasterPrompt: document.getElementById("xMasterPrompt"), xAiProvider: document.getElementById("xAiProvider"), xAiModel: document.getElementById("xAiModel"),
+    xMasterPrompt: document.getElementById("xMasterPrompt"), // MARKER: XAP-LANG-ELS-v1 xLanguage: document.getElementById("xLanguage"), xAiProvider: document.getElementById("xAiProvider"), xAiModel: document.getElementById("xAiModel"),
     xAiKey: document.getElementById("xAiKey"), xAccessToken: document.getElementById("xAccessToken"), xBearerToken: document.getElementById("xBearerToken"), xEnabled: document.getElementById("xEnabled"),
     xSaveBtn: document.getElementById("xSaveBtn"), xGenerateBtn: document.getElementById("xGenerateBtn"), xClearQueueBtn: document.getElementById("xClearQueueBtn"), xLiveStatus: document.getElementById("xLiveStatus"), xReferenceUser: document.getElementById("xReferenceUser"),
     xReferenceText: document.getElementById("xReferenceText"), xReferenceUrl: document.getElementById("xReferenceUrl"), xReferenceBtn: document.getElementById("xReferenceBtn"),
-    xReferencesList: document.getElementById("xReferencesList"), xQueueCount: document.getElementById("xQueueCount"), xQueueList: document.getElementById("xQueueList"), xLogs: document.getElementById("xLogs"),
+    xReferencesList: document.getElementById("xReferencesList"),
+    aiChainBadge: document.getElementById("aiChainBadge"), aiChainList: document.getElementById("aiChainList"), aiChainEnabled: document.getElementById("aiChainEnabled"), aiProviderGrid: document.getElementById("aiProviderGrid"), aiTestProvider: document.getElementById("aiTestProvider"), aiTestBtn: document.getElementById("aiTestBtn"), aiTestResult: document.getElementById("aiTestResult"), aiLastTest: document.getElementById("aiLastTest"),
+    xLoginBanner: document.getElementById("xLoginBanner"), xLoginTitle: document.getElementById("xLoginTitle"), xLoginMessage: document.getElementById("xLoginMessage"), xLoginStateBadge: document.getElementById("xLoginStateBadge"), xLoginBtn: document.getElementById("xLoginBtn"), xLoginSaveBtn: document.getElementById("xLoginSaveBtn"), xLoginCloseBtn: document.getElementById("xLoginCloseBtn"), xCookiesInput: document.getElementById("xCookiesInput"), xCookiesBtn: document.getElementById("xCookiesBtn"), xRetryBtn: document.getElementById("xRetryBtn"),
+    // MARKER: XAP-BIND-v1, xQueueCount: document.getElementById("xQueueCount"), xQueueList: document.getElementById("xQueueList"), xLogs: document.getElementById("xLogs"),
     flowSessionBadge: document.getElementById("flowSessionBadge"),
     flowAccountName: document.getElementById("flowAccountName"),
     flowAccountId: document.getElementById("flowAccountId"),
@@ -305,13 +308,21 @@ const UI = {
     if (this.els.xSaveBtn) this.els.xSaveBtn.addEventListener("click", () => this.saveXConfig());
     if (this.els.xGenerateBtn) this.els.xGenerateBtn.addEventListener("click", () => this.generateX());
     if (this.els.xClearQueueBtn) this.els.xClearQueueBtn.addEventListener("click", () => this.clearXQueue());
-    ["xUsername", "xPostsPerDay", "xDailyTimes", "xPostingMode", "xAccountTier", "xContentMode", "xSearchTopic", "xMasterPrompt", "xAiProvider", "xAiModel", "xEnabled"].forEach((key) => {
+    ["xUsername", "xPostsPerDay", "xDailyTimes", "xPostingMode", "xAccountTier", "xContentMode", "xSearchTopic", /* MARKER: XAP-LANG-DIRTY-v1 */ "xLanguage", "xMasterPrompt", "xAiProvider", "xAiModel", "xEnabled"].forEach((key) => {
       const element = this.els[key];
       if (element) {
         element.addEventListener("input", () => this.xDirty.add(key));
         element.addEventListener("change", () => this.xDirty.add(key));
       }
     });
+    // MARKER: XAP-HANDLERS-v1
+    if (this.els.xLoginBtn) this.els.xLoginBtn.addEventListener("click", () => this.xLoginOpen());
+    if (this.els.xLoginSaveBtn) this.els.xLoginSaveBtn.addEventListener("click", () => this.xLoginSave());
+    if (this.els.xLoginCloseBtn) this.els.xLoginCloseBtn.addEventListener("click", () => this.xLoginClose());
+    if (this.els.xCookiesBtn) this.els.xCookiesBtn.addEventListener("click", () => this.xImportCookies());
+    if (this.els.xRetryBtn) this.els.xRetryBtn.addEventListener("click", () => this.xRetryFailed());
+    if (this.els.aiTestBtn) this.els.aiTestBtn.addEventListener("click", () => this.testAiProvider());
+    if (this.els.aiChainEnabled) this.els.aiChainEnabled.addEventListener("change", () => this.toggleAiChain(this.els.aiChainEnabled.checked));
     if (this.els.xReferenceBtn) this.els.xReferenceBtn.addEventListener("click", () => this.addXReference());
     if (this.els.flowLoginBtn) this.els.flowLoginBtn.addEventListener("click", () => this.openFlowLogin());
     if (this.els.flowCloseBtn) this.els.flowCloseBtn.addEventListener("click", () => this.closeFlowLogin());
@@ -1371,6 +1382,386 @@ const UI = {
   startPolling() {
     this.refresh();
     setInterval(() => this.refresh(), 3000);
+  },
+
+  // MARKER: XAP-RENDER-v1
+  async refreshXSession() {
+    try {
+      const data = await API.get("/api/x-autopilot/session");
+      this.renderXSession(data);
+    } catch (error) {
+      if (this.els.xLoginStateBadge) this.els.xLoginStateBadge.textContent = "Sin sesion";
+    }
+  },
+
+  renderXSession(data) {
+    if (!this.els.xLoginStateBadge) return;
+    const session = data?.session || {};
+    const ready = Boolean(session.saved);
+    this.els.xLoginStateBadge.textContent = ready ? "Sesion guardada" : (session.open ? "Ventana abierta" : "Sin sesion");
+    this.els.xLoginStateBadge.className = "status-badge" + (ready ? " success" : "");
+    if (this.els.xLoginMessage) {
+      this.els.xLoginMessage.textContent = ready
+        ? "Sesion de X lista. La publicacion automatica usara esta cuenta."
+        : "Aun no hay sesion guardada. Inicia sesion en la ventana de X o pega tus cookies.";
+    }
+    const worker = data?.worker ? "worker activo" : "worker detenido";
+    if (this.els.xLoginTitle) this.els.xLoginTitle.textContent = "Sesion de X (Twitter) - " + worker;
+  },
+
+  async xLoginOpen() { try { await API.post("/api/x-autopilot/login", {}); await this.refreshXSession(); } catch (error) { alert(error.message); } },
+  async xLoginSave() { try { const r = await API.post("/api/x-autopilot/login/save", {}); if (r && r.ok === false) throw new Error(r.error); await this.refreshXSession(); } catch (error) { alert(error.message); } },
+  async xLoginClose() { try { await API.post("/api/x-autopilot/login/close", {}); await this.refreshXSession(); } catch (error) { alert(error.message); } },
+  async xImportCookies() {
+    const value = this.els.xCookiesInput?.value || "";
+    if (!value.trim()) { alert("Pega tus cookies primero."); return; }
+    try {
+      const r = await API.post("/api/x-autopilot/cookies", { cookies: value });
+      if (r && r.ok === false) throw new Error(r.error);
+      if (this.els.xCookiesInput) this.els.xCookiesInput.value = "";
+      await this.refreshXSession();
+    } catch (error) { alert(error.message); }
+  },
+  async xRetryFailed() { try { await API.post("/api/x-autopilot/retry", {}); await this.refreshXAutopilot(); } catch (error) { alert(error.message); } },
+
+  async refreshXAutopilot() { try { const data = await API.get("/api/x-autopilot"); this.renderXAutopilot(data); } catch {} },
+
+  // MARKER: AICFG-LOGIC-v1
+  aiConfig: null,
+
+  async loadAiConfig() {
+    try {
+      this.aiConfig = await API.get("/api/ai-config");
+      this.renderAiConfig(this.aiConfig);
+      return this.aiConfig;
+    } catch (error) {
+      if (this.els.aiChainBadge) this.els.aiChainBadge.textContent = "Error: " + error.message;
+      return null;
+    }
+  },
+
+  renderAiConfig(data) {
+    if (!data) return;
+    const chain = data.chain || [];
+    if (this.els.aiChainBadge) {
+      this.els.aiChainBadge.textContent = chain.length
+        ? chain.length + " modelos listos"
+        : "Sin proveedores";
+      this.els.aiChainBadge.className = "status-badge" + (chain.length ? " success" : "");
+    }
+    if (this.els.aiChainEnabled) this.els.aiChainEnabled.checked = data.enabled !== false;
+
+    if (this.els.aiChainList) {
+      const steps = [];
+      const seen = new Set();
+      for (const item of chain) {
+        if (seen.has(item.provider)) continue;
+        seen.add(item.provider);
+        steps.push(`<span class="ai-chain-step ${item.free ? "free" : ""}">${escapeHtml(item.label)}${item.free ? " · gratis" : ""}</span>`);
+      }
+      this.els.aiChainList.innerHTML = steps.length
+        ? steps.join('<span class="ai-chain-arrow">→</span>')
+        : '<span class="form-hint">Aun no hay ninguna clave guardada. Empieza por xKiro, que es gratis.</span>';
+    }
+
+    if (this.els.aiProviderGrid) {
+      this.els.aiProviderGrid.innerHTML = (data.providers || []).map((provider) => {
+        const status = data.providerKeys?.[provider.id] || {};
+        const modelList = (provider.models || []).map((m) => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label || m.id)}</option>`).join("");
+        return `
+          <div class="card">
+            <div class="card-title" style="display:flex; align-items:center; gap:8px;">
+              ${escapeHtml(provider.label)}
+              ${provider.free ? '<span class="tag-free">gratis</span>' : ""}
+              ${status.configured ? '<span class="tag-ok">lista</span>' : ""}
+            </div>
+            <p class="form-hint">${escapeHtml(provider.keyHint || "")}</p>
+            <div class="helios-key-row">
+              <input id="aiKey_${provider.id}" class="control-input" type="password"
+                placeholder="${status.configured ? escapeHtml(status.masked) : "Pega tu clave"}" />
+              <button class="control-btn-small primary" data-ai-save="${provider.id}">Guardar</button>
+              <button class="control-btn-small danger" data-ai-remove="${provider.id}">Quitar</button>
+            </div>
+            <div class="helios-key-row" style="margin-top:8px;">
+              <select class="control-input" id="aiModel_${provider.id}">${modelList}</select>
+            </div>
+          </div>`;
+      }).join("");
+
+      this.els.aiProviderGrid.querySelectorAll("[data-ai-save]").forEach((button) => {
+        button.addEventListener("click", () => this.saveAiKey(button.dataset.aiSave));
+      });
+      this.els.aiProviderGrid.querySelectorAll("[data-ai-remove]").forEach((button) => {
+        button.addEventListener("click", () => this.removeAiKey(button.dataset.aiRemove));
+      });
+    }
+
+    if (this.els.aiTestProvider) {
+      this.els.aiTestProvider.innerHTML = (data.providers || [])
+        .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`)
+        .join("");
+    }
+    if (this.els.aiLastTest) {
+      const last = data.lastTest;
+      this.els.aiLastTest.textContent = last
+        ? `Ultima prueba: ${last.provider}/${last.model} · ${last.ms}ms · "${String(last.sample || "").slice(0, 40)}"`
+        : "Aun no has probado ninguna clave.";
+    }
+  },
+
+  async saveAiKey(providerId) {
+    const input = document.getElementById("aiKey_" + providerId);
+    const value = input?.value.trim() || "";
+    if (!value) { alert("Pega la clave primero."); return; }
+    try {
+      await API.post("/api/ai-config", { providerKeys: { [providerId]: value } });
+      input.value = "";
+      await this.loadAiConfig();
+    } catch (error) { alert(error.message); }
+  },
+
+  async removeAiKey(providerId) {
+    try {
+      await API.post("/api/ai-config", { removeProviders: [providerId] });
+      await this.loadAiConfig();
+    } catch (error) { alert(error.message); }
+  },
+
+  async testAiProvider() {
+    const provider = this.els.aiTestProvider?.value;
+    if (!provider) return;
+    if (this.els.aiTestResult) this.els.aiTestResult.textContent = "Probando...";
+    try {
+      const data = await API.post("/api/ai-config/test", { provider });
+      const last = data.lastTest || {};
+      if (this.els.aiTestResult) this.els.aiTestResult.textContent = `OK · ${last.model} · ${last.ms}ms`;
+      this.renderAiConfig(data);
+    } catch (error) {
+      if (this.els.aiTestResult) this.els.aiTestResult.textContent = "Fallo: " + error.message;
+    }
+  },
+
+  async toggleAiChain(enabled) {
+    try {
+      const data = await API.post("/api/ai-config", { enabled: Boolean(enabled) });
+      this.renderAiConfig(data);
+    } catch (error) { alert(error.message); }
+  },
+
+    // MARKER: ACCTAN-JS-v1
+  acctProfiles: [],
+  acctSelected: null,
+  acctPoll: null,
+  acctSession: { saved: false, open: false },
+
+  async refreshAcctSession() {
+    try {
+      const data = await API.get("/api/x-autopilot/session");
+      this.acctSession = data.session || { saved: false, open: false };
+    } catch {
+      this.acctSession = { saved: false, open: false };
+    }
+    this.renderAcctSession();
+    return this.acctSession;
+  },
+
+  renderAcctSession() {
+    const s = this.acctSession || {};
+    const saved = Boolean(s.saved);
+    if (this.els.acctSessionBadge) {
+      this.els.acctSessionBadge.textContent = saved ? "Sesion guardada" : (s.open ? "Ventana abierta" : "Sin sesion");
+      this.els.acctSessionBadge.className = "status-badge" + (saved ? " success" : "");
+    }
+    if (this.els.acctSessionMessage) {
+      this.els.acctSessionMessage.textContent = saved
+        ? "Sesion de X lista. Ya puedes analizar cualquier cuenta."
+        : "Necesitas iniciar sesion en X aqui mismo para poder leer los posts de una cuenta.";
+    }
+    if (this.els.acctStartBtn) {
+      this.els.acctStartBtn.disabled = !saved;
+      this.els.acctStartBtn.style.opacity = saved ? "1" : "0.5";
+      this.els.acctStartBtn.style.cursor = saved ? "pointer" : "not-allowed";
+      this.els.acctStartBtn.title = saved ? "Analizar la cuenta" : "Primero inicia sesion en X";
+    }
+    if (this.els.acctSessionWarning) {
+      this.els.acctSessionWarning.style.display = saved ? "none" : "block";
+    }
+  },
+
+  async acctLoginOpen() {
+    try {
+      await API.post("/api/x-autopilot/login", {});
+      await this.refreshAcctSession();
+      this.setAcctProgress("Ventana de X abierta. Inicia sesion en ella y luego pulsa Guardar sesion.");
+    } catch (error) { this.setAcctProgress("Error: " + error.message, true); }
+  },
+
+  async acctLoginSave() {
+    try {
+      const r = await API.post("/api/x-autopilot/login/save", {});
+      if (r && r.ok === false) throw new Error(r.error);
+      await this.refreshAcctSession();
+      this.setAcctProgress("Sesion guardada. Ya puedes analizar una cuenta.");
+    } catch (error) { this.setAcctProgress("Error: " + error.message, true); }
+  },
+
+  async acctLoginClose() {
+    try {
+      await API.post("/api/x-autopilot/login/close", {});
+      await this.refreshAcctSession();
+    } catch (error) { alert(error.message); }
+  },
+
+  async loadAccountAnalysis() {
+    try {
+      const data = await API.get("/api/account-analysis");
+      this.acctProfiles = data.profiles || [];
+      this.renderAccountProfiles();
+      if (data.job && data.job.running) this.startAcctPolling();
+      else if (data.job && data.job.error) this.setAcctProgress("Error: " + data.job.error, true);
+      return data;
+    } catch (error) {
+      if (this.els.acctAnalysisBadge) this.els.acctAnalysisBadge.textContent = "Error";
+      return null;
+    }
+  },
+
+  renderAccountProfiles() {
+    const list = this.els.acctProfileList;
+    if (!list) return;
+    if (this.els.acctAnalysisBadge) {
+      this.els.acctAnalysisBadge.textContent = this.acctProfiles.length
+        ? this.acctProfiles.length + " cuenta(s)"
+        : "Sin analisis";
+      this.els.acctAnalysisBadge.className = "status-badge" + (this.acctProfiles.length ? " success" : "");
+    }
+    if (!this.acctProfiles.length) {
+      list.innerHTML = '<div class="setup-empty">Todavia no has analizado ninguna cuenta.</div>';
+      return;
+    }
+    list.innerHTML = this.acctProfiles.map((p) => `
+      <div class="x-reference-item" style="cursor:pointer;" data-acct="${escapeHtml(p.handle)}">
+        <strong>@${escapeHtml(p.handle)}</strong>
+        <span>${p.posts} publicaciones · ${p.originals} propias · ${p.replies} respuestas</span>
+        <span class="form-hint">${escapeHtml((p.topTopics || []).join(" · "))}</span>
+      </div>`).join("");
+    list.querySelectorAll("[data-acct]").forEach((node) => {
+      node.addEventListener("click", () => this.openAccountProfile(node.dataset.acct));
+    });
+  },
+
+  async openAccountProfile(handle) {
+    try {
+      const data = await API.get("/api/account-analysis/" + encodeURIComponent(handle));
+      this.acctSelected = data.data;
+      this.renderAccountDetail();
+    } catch (error) { alert(error.message); }
+  },
+
+  renderAccountDetail() {
+    const data = this.acctSelected;
+    if (!data) return;
+    const a = data.analysis || {};
+    const f = a.format || {};
+    if (this.els.acctDetailTitle) this.els.acctDetailTitle.textContent = "@" + data.handle;
+    if (this.els.acctDetailBody) {
+      const topics = (a.topics || []).slice(0, 5).map((t) => `<span class="ai-chain-step">${escapeHtml(t.topic)} · ${t.count}</span>`).join("");
+      const hints = (a.keywords || []).slice(0, 20).map((k) => k.word).join(", ");
+      this.els.acctDetailBody.innerHTML = `
+        <div class="ai-chain-list" style="margin-bottom:12px;">${topics || '<span class="form-hint">Sin temas detectados.</span>'}</div>
+        <p class="form-hint"><b>${f.total || 0}</b> publicaciones · <b>${f.originalPosts || 0}</b> propias · <b>${f.replies || 0}</b> respuestas</p>
+        <p class="form-hint">Longitud media: <b>${f.avgLength || 0}</b> caracteres · Emojis: ${f.emojiRatio ?? 0} · Imagen en ${f.withImage || 0}</p>
+        <p class="form-hint">Sentimiento: <b>${escapeHtml(a.sentiment?.label || "?")}</b> (${a.sentiment?.score ?? 0})</p>
+        <p class="form-hint">Ritmo: <b>${a.rhythm?.postsPerDay ?? 0}</b> publicaciones/dia durante ${a.rhythm?.spanDays ?? 0} dias</p>
+        <p class="form-hint" style="margin-top:8px;">Palabras clave: ${escapeHtml(hints)}</p>`;
+    }
+    if (this.els.acctManual) this.els.acctManual.textContent = data.manual || "Sin manual generado.";
+    if (this.els.acctUseBtn) this.els.acctUseBtn.dataset.handle = data.handle;
+  },
+
+  async startAccountAnalysis() {
+    const handle = (this.els.acctHandle?.value || "").trim();
+    if (!handle) { this.setAcctProgress("Escribe un @ de X primero.", true); return; }
+    if (!this.acctSession?.saved) {
+      this.setAcctProgress("No puedes analizar todavia: primero inicia sesion en X (boton de arriba).", true);
+      if (this.els.acctSessionWarning) this.els.acctSessionWarning.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    const maxPosts = Number(this.els.acctMaxPosts?.value) || 150;
+    try {
+      this.setAcctProgress("Iniciando analisis de " + handle + "...");
+      await API.post("/api/account-analysis/start", { handle, maxPosts });
+      this.startAcctPolling();
+    } catch (error) { this.setAcctProgress("Error: " + error.message, true); }
+  },
+
+  startAcctPolling() {
+    if (this.acctPoll) return;
+    this.setAcctProgress("Preparando la extraccion...");
+    this.acctPoll = setInterval(async () => {
+      try {
+        const job = await API.get("/api/account-analysis/status");
+        if (job.running) {
+          const phases = {
+            "abriendo perfil": "Abriendo el perfil en X",
+            "cargando perfil": "Cargando el perfil",
+            "recogiendo publicaciones": "Recogiendo publicaciones",
+            "analizando": "Analizando los datos",
+            "generando manual": "Generando el manual de ADN",
+          };
+          const label = phases[job.phase] || job.phase;
+          this.setAcctProgress(`@${job.handle} — ${label}: ${job.collected} de ${job.maxPosts} publicaciones. No cierres esta ventana.`);
+        } else {
+          clearInterval(this.acctPoll);
+          this.acctPoll = null;
+          if (job.error) this.setAcctProgress("Error: " + job.error, true);
+          else {
+            this.setAcctProgress(`Listo: ${job.collected} publicaciones analizadas. Ya aparece abajo.`);
+            await this.loadAccountAnalysis();
+            if (job.handle) await this.openAccountProfile(job.handle);
+          }
+        }
+      } catch (error) {
+        clearInterval(this.acctPoll);
+        this.acctPoll = null;
+        this.setAcctProgress("Error al consultar el progreso: " + error.message, true);
+      }
+    }, 3000);
+  },
+
+  setAcctProgress(message, isError) {
+    const box = this.els.acctProgressBox;
+    const text = this.els.acctProgress;
+    if (!text) return;
+    text.textContent = message;
+    if (box) {
+      box.style.display = "block";
+      box.style.background = isError ? "#2a0f0f" : "#101c2e";
+      box.style.borderColor = isError ? "#5c1a1a" : "#1e3a63";
+      text.style.color = isError ? "#f87171" : "#9cc3ff";
+    }
+  },
+
+  async useAccountForReference() {
+    const handle = this.els.acctUseBtn?.dataset.handle;
+    if (!handle) { alert("Selecciona una cuenta primero."); return; }
+    try {
+      await API.post("/api/x-autopilot/configure", { referenceHandle: handle });
+      alert("Ahora X Autopilot usara @" + handle + " como referencia de estilo.");
+    } catch (error) { alert(error.message); }
+  },
+
+  async deleteAccountAnalysis() {
+    const handle = this.els.acctUseBtn?.dataset.handle;
+    if (!handle) { alert("Selecciona una cuenta primero."); return; }
+    if (!confirm("Borrar el analisis de @" + handle + "?")) return;
+    try {
+      await API.delete("/api/account-analysis/" + encodeURIComponent(handle));
+      this.acctSelected = null;
+      if (this.els.acctManual) this.els.acctManual.textContent = "Selecciona una cuenta para ver su manual.";
+      if (this.els.acctDetailBody) this.els.acctDetailBody.innerHTML = '<p class="form-hint">Selecciona una cuenta de la lista.</p>';
+      await this.loadAccountAnalysis();
+    } catch (error) { alert(error.message); }
   },
 
   async refresh() {
@@ -2703,7 +3094,7 @@ const UI = {
       const payload = {
         enabled: Boolean(this.els.xEnabled?.checked), postsPerDay: Number(this.els.xPostsPerDay?.value) || 3,
         dailyTimes: String(this.els.xDailyTimes?.value || "09:00").split(",").map((v) => v.trim()).filter(Boolean),
-        postingMode: this.els.xPostingMode?.value || "simulation", masterPrompt: this.els.xMasterPrompt?.value || "",
+        postingMode: this.els.xPostingMode?.value || "simulation", masterPrompt: this.els.xMasterPrompt?.value || "", // MARKER: XAP-LANG-PAYLOAD-v1 language: this.els.xLanguage?.value === "es" ? "es" : "en",
         accountTier: this.els.xAccountTier?.value || "free", contentMode: this.els.xContentMode?.value || "ai", searchTopic: this.els.xSearchTopic?.value || "",
         ai: { provider, baseUrl: defaultUrls[provider], model: this.els.xAiModel?.value || defaultModels[provider], ...(key !== undefined ? { apiKey: key } : {}) },
         x: { username: this.els.xUsername?.value || "", ...(token !== undefined ? { accessToken: token } : {}), ...(bearerToken !== undefined ? { bearerToken } : {}) },
@@ -2724,7 +3115,7 @@ const UI = {
     const config = data.config;
     if (this.els.xWorkerBadge) { this.els.xWorkerBadge.textContent = data.worker ? "Worker activo" : "Worker detenido"; this.els.xWorkerBadge.classList.toggle("active", data.worker); }
     const setValue = (el, value, key) => { if (el && !this.xDirty.has(key) && document.activeElement !== el) el.value = value ?? ""; };
-    setValue(this.els.xUsername, config.x?.username, "xUsername"); setValue(this.els.xPostsPerDay, config.postsPerDay, "xPostsPerDay"); setValue(this.els.xDailyTimes, (config.dailyTimes || []).join(", "), "xDailyTimes"); setValue(this.els.xPostingMode, config.postingMode, "xPostingMode"); setValue(this.els.xAccountTier, config.accountTier, "xAccountTier"); setValue(this.els.xContentMode, config.contentMode, "xContentMode"); setValue(this.els.xSearchTopic, config.searchTopic, "xSearchTopic"); setValue(this.els.xMasterPrompt, config.masterPrompt, "xMasterPrompt"); setValue(this.els.xAiProvider, config.ai?.provider, "xAiProvider"); setValue(this.els.xAiModel, config.ai?.model, "xAiModel");
+    setValue(this.els.xUsername, config.x?.username, "xUsername"); setValue(this.els.xPostsPerDay, config.postsPerDay, "xPostsPerDay"); setValue(this.els.xDailyTimes, (config.dailyTimes || []).join(", "), "xDailyTimes"); setValue(this.els.xPostingMode, config.postingMode, "xPostingMode"); setValue(this.els.xAccountTier, config.accountTier, "xAccountTier"); setValue(this.els.xContentMode, config.contentMode, "xContentMode"); setValue(this.els.xSearchTopic, config.searchTopic, "xSearchTopic"); setValue(this.els.xMasterPrompt, config.masterPrompt, "xMasterPrompt"); setValue(this.els.xLanguage, config.language === "es" ? "es" : "en", "xLanguage"); // MARKER: XAP-LANG-RENDER-v1 setValue(this.els.xAiProvider, config.ai?.provider, "xAiProvider"); setValue(this.els.xAiModel, config.ai?.model, "xAiModel");
     if (this.els.xLiveStatus) this.els.xLiveStatus.textContent = config.postingMode === "live" && config.x?.accessToken === "configured" ? "Modo live configurado: las publicaciones se enviaran a X cuando llegue su hora." : config.postingMode === "live" ? "Falta el User Access Token de X. Live no simulara publicaciones: mostrara un error." : "Modo simulacion: las publicaciones no se envian a X. Usa live y un User Access Token con permiso Write.";
     if (this.els.xEnabled && document.activeElement !== this.els.xEnabled) this.els.xEnabled.checked = Boolean(config.enabled);
     if (this.els.xQueueCount) this.els.xQueueCount.textContent = `${data.queue?.length || 0}`;

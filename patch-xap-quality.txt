@@ -1,0 +1,16 @@
+// TSAFE-XAP-QUALITY: valida un texto generado antes de publicarlo.
+// Devuelve null si TypeSafe no esta configurado o falla (nunca rompe el flujo).
+async function typesafeQuality(item, text) {
+  try {
+    const ts = require("./typesafe");
+    if (!ts.configured || !ts.configured()) return null;
+    return await ts.decide("publish_quality", {
+      texto_generado: String(text || "").slice(0, 1500),
+      master_prompt: String(item.config.masterPrompt || "").slice(0, 800),
+      idioma_esperado: itemLanguage(item),
+      max_caracteres: maxCharacters(item),
+    });
+  } catch {
+    return null;
+  }
+}
