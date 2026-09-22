@@ -67,6 +67,9 @@ const config = {
   postDelayMs: Number(process.env.POST_DELAY_MS || 15000),
   postPublishHoldMs: Number(process.env.POST_PUBLISH_HOLD_MS || 25000),
   failureHoldMs: Number(process.env.FAILURE_HOLD_MS || 8000),
+  // Si falla la programacion, cerrar igualmente: una ventana abierta
+  // bloquea el perfil y hace fallar los videos siguientes del lote.
+  keepBrowserOnScheduleFail: getBoolean(process.env.KEEP_BROWSER_ON_SCHEDULE_FAIL, false),
   autoAddSound: getBoolean(process.env.AUTO_ADD_SOUND, false),
   randomQueueOrder: getBoolean(process.env.RANDOM_QUEUE_ORDER, false),
   defaultSoundQuery: process.env.DEFAULT_SOUND_QUERY || "",

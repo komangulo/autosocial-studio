@@ -191,22 +191,48 @@ class AutonomousWorker {
    * poll.
    */
   async drainTikTokQueue({ maxJobs = 100, onJob } = {}) {
+    // MARKER: TIKTOK-LANE-EXCLUSIVE-v1
+    // Mientras este bucle drena, el temporizador NO debe lanzar otro job de
+    // TikTok: si no, se abren DOS Chrome sobre el mismo perfil y el segundo
+    // muere con exitCode=21 (se publicaba 1 y fallaban los siguientes).
+    if (this.laneBusy["tiktok-publish"]) {
+      // Ya hay un drenaje en curso: no duplicar.
+      return { processed: 0, published: 0, failed: 0, skipped: true };
+    }
+    this.laneBusy["tiktok-publish"] = true;
     this.clearCancellation();
     let processed = 0;
-    while (processed < maxJobs) {
-      if (this.isCancelled()) break;
-      const job = await this.store.claimDue(new Date(), { type: "tiktok-publish" });
-      if (!job) break;
-      await onJob?.(job);
-      if (this.isCancelled()) {
-        // Give the claimed job back so it can run later, then stop.
-        await this.store.release?.(job.id).catch?.(() => {});
-        break;
+    let published = 0;
+    let failed = 0;
+    try {
+      while (processed < maxJobs) {
+        if (this.isCancelled()) break;
+        const job = await this.store.claimDue(new Date(), { type: "tiktok-publish" });
+        if (!job) break;
+        await onJob?.(job);
+        if (this.isCancelled()) {
+          // Devolvemos el job reclamado para que se pueda ejecutar luego.
+          try {
+            if (typeof this.store.release === "function") {
+              await this.store.release(job.id);
+            }
+          } catch {
+            // Liberar es best-effort.
+          }
+          break;
+        }
+        this._lastOutcome = null;
+        await this.runClaimedJob(job);
+        processed += 1;
+        if (this._lastOutcome === "failed") failed += 1;
+        else if (this._lastOutcome === "succeeded") published += 1;
       }
-      await this.runClaimedJob(job);
-      processed += 1;
+    } finally {
+      this.laneBusy["tiktok-publish"] = false;
     }
-    return processed;
+    // Resumen honesto: antes se devolvia solo un numero y el mensaje final
+    // decia "N programados" aunque hubieran fallado.
+    return { processed, published, failed };
   }
 
   recordError(error) {
@@ -261,6 +287,8 @@ class AutonomousWorker {
   }
 
   async dispatchLane(type, now) {
+    // MARKER: TIKTOK-LANE-EXCLUSIVE-v1
+    // Si el bucle de drenaje tiene el lane tomado, no lanzar otro job.
     if (this.laneBusy[type]) return;
     this.laneBusy[type] = true;
     try {
@@ -282,10 +310,12 @@ class AutonomousWorker {
       const result = job.type === "tiktok-publish"
         ? await this.executeTikTokPublish(job)
         : await this.executeFlowGeneration(job);
+      this._lastOutcome = "succeeded";
       await this.store.complete(job.id, result);
       this.lastError = null;
     } catch (error) {
       this.recordError(error);
+      this._lastOutcome = "failed";
       await this.store.fail(job.id, error, { uncertain: Boolean(error.uncertain) }).catch((storeError) => this.recordError(storeError));
     }
   }

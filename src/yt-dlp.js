@@ -24,7 +24,16 @@ function ytDlpCandidates() {
     path.resolve(config.projectRoot, "bin"),
     config.projectRoot,
   ];
-  const out = [process.env.YTDLP_PATH];
+  const configured = String(process.env.YTDLP_PATH || "")
+    .trim()
+    .replace(/^(["'])(.*)\1$/, "$2");
+  // Resolve relative .env paths from the project, not from the launch folder.
+  const configuredPath = configured
+    ? (path.isAbsolute(configured)
+      ? configured
+      : path.resolve(config.projectRoot, configured))
+    : "";
+  const out = [configuredPath];
   for (const root of roots) {
     for (const name of names) {
       out.push(path.resolve(root, name));

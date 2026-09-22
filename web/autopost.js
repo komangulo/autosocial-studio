@@ -331,7 +331,22 @@
             startPollTimer = null;
             els.startBtn.disabled = false;
             if (run?.error) setMessage(`Terminó con un error: ${run.error}`, "error");
-            else setMessage(`Listo. ${run?.done || 0} vídeos programados en TikTok. Ya puedes apagar el PC.`, "ok");
+            else {
+              // TIKTOK-HONEST-SUMMARY-v2: informar de lo que REALMENTE se subio.
+              const published = run?.published;
+              const failedCount = run?.failed || 0;
+              if (failedCount > 0) {
+                const okCount = Number.isFinite(published) ? published : (run?.done || 0) - failedCount;
+                setMessage(
+                  `Listo. ${okCount} vídeos subidos a TikTok y ${failedCount} fallaron. Revisa la carpeta failed del proyecto.`,
+                  "error"
+                );
+              } else if (Number.isFinite(published)) {
+                setMessage(`Listo. ${published} vídeos programados en TikTok. Ya puedes apagar el PC.`, "ok");
+              } else {
+                setMessage(`Listo. ${run?.done || 0} vídeos programados en TikTok. Ya puedes apagar el PC.`, "ok");
+              }
+            }
           }
         } catch (error) {
           clearInterval(startPollTimer);

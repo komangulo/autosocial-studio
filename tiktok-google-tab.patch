@@ -1,0 +1,147 @@
+diff --git a/src/tiktok-uploader.js b/src/tiktok-uploader.js
+index 860b723..099609f 100644
+--- a/src/tiktok-uploader.js
++++ b/src/tiktok-uploader.js
+@@ -28,6 +28,14 @@ let tempMailSetupState = {
+   startedAt: null,
+   completedAt: null,
+ };
++let assistedAccountSetupState = {
++  accountId: null,
++  open: false,
++  stage: "idle",
++  message: "No assisted TikTok account setup is running.",
++  startedAt: null,
++  completedAt: null,
++};
+ 
+ /**
+  * // MARKER: TIKTOK-PROFILE-RELEASE-v1
+@@ -2883,6 +2891,102 @@ function startDashboardLoginSessionDetached() {
+   return { ok: true, opening: true, message: "Abriendo Chromium..." };
+ }
+ 
++async function selectTikTokSignupDate(page) {
++  const fields = [
++    { label: "Month", value: "April" },
++    { label: "Day", value: "18" },
++    { label: "Year", value: "1988" },
++  ];
++
++  for (const field of fields) {
++    const combobox = page.getByRole("combobox", { name: new RegExp("^" + field.label + "\\.") }).first();
++    await combobox.waitFor({ state: "visible", timeout: 15000 });
++    await combobox.click();
++    const option = page.getByRole("option", { name: field.value, exact: true }).last();
++    await option.waitFor({ state: "visible", timeout: 10000 });
++    await option.click();
++  }
++}
++
++async function prepareTikTokSignup(page) {
++  const channel = page.locator('[data-e2e="channel-item"]').filter({ hasText: /Use phone or email/i }).first();
++  await channel.waitFor({ state: "visible", timeout: 20000 });
++  await channel.scrollIntoViewIfNeeded();
++  await channel.click({ force: true });
++
++  const emailLink = page.locator('a[href="/signup/phone-or-email/email"]').first();
++  await emailLink.waitFor({ state: "visible", timeout: 20000 });
++  await emailLink.scrollIntoViewIfNeeded();
++  await Promise.all([
++    page.waitForURL(/\/signup\/phone-or-email\/email/i, { timeout: 20000 }).catch(() => {}),
++    emailLink.click({ force: true }),
++  ]);
++  await selectTikTokSignupDate(page);
++}
++
++async function openGoogleTab(context, currentPage) {
++  const existing = context.pages().find((tab) => /google\./i.test(tab.url()));
++  if (existing) {
++    await existing.bringToFront().catch(() => {});
++    return existing;
++  }
++  const tab = await context.newPage();
++  await tab.goto("https://www.google.es/", { waitUntil: "domcontentloaded" }).catch(() => {});
++  await currentPage?.bringToFront().catch(() => {});
++  return tab;
++}
++
++async function startAssistedTikTokAccountSetup(accountId) {
++  const account = await requireAccount(accountId);
++  const { context, alreadyOpen } = await openLoginContextForAccount(account.id);
++  const page = context.pages()[0] || (await context.newPage());
++
++  if (!alreadyOpen || !/tiktok\.com/i.test(page.url())) {
++    await page.goto("https://www.tiktok.com/signup", { waitUntil: "domcontentloaded" });
++  }
++  await openGoogleTab(context, page);
++
++  let setupMessage = "Completa manualmente el correo, la contrasena, el CAPTCHA y el codigo de verificacion.";
++  let setupStage = "manual-signup";
++  try {
++    await prepareTikTokSignup(page);
++    setupMessage = "Metodo de registro y fecha 18/04/1988 preparados. Completa manualmente el correo, la contrasena, el CAPTCHA y el codigo de verificacion.";
++  } catch (error) {
++    setupStage = "needs-attention";
++    setupMessage = "TikTok no mostro el formulario esperado. Completa los pasos iniciales manualmente. Detalle: " + error.message;
++  }
++
++  assistedAccountSetupState = {
++    accountId: account.id,
++    open: true,
++    stage: setupStage,
++    message: setupMessage,
++    startedAt: new Date().toISOString(),
++    completedAt: null,
++  };
++  return { ok: true, account, status: getAssistedAccountSetupStatus() };
++}
++
++async function confirmAssistedTikTokAccountSetup() {
++  const accountId = assistedAccountSetupState.accountId;
++  if (!accountId) throw new Error("No hay un registro asistido en curso.");
++  const saved = await hasSavedPlatformSession("tiktok", accountId);
++  if (!saved) {
++    throw new Error("No detecto una sesion guardada todavia. Termina el registro e inicia sesion en TikTok.");
++  }
++  assistedAccountSetupState = {
++    ...assistedAccountSetupState,
++    stage: "ready",
++    message: "Cuenta confirmada. La sesion se conserva en el perfil persistente de esta cuenta.",
++    completedAt: new Date().toISOString(),
++  };
++  return getAssistedAccountSetupStatus();
++}
++
++function getAssistedAccountSetupStatus() {
++  return { ...assistedAccountSetupState };
++}
++
+ async function captureTempMailForAccount(accountId) {
+   if (!tempMailSetupPage || tempMailSetupPage.isClosed()) {
+     tempMailSetupPage = loginSessionContext?.pages()
+@@ -3001,6 +3105,14 @@ async function closeLoginSession() {
+       ? "Temporary email saved. The Chromium window is closed."
+       : "The Chromium setup window was closed.",
+   };
++  assistedAccountSetupState = {
++    ...assistedAccountSetupState,
++    open: false,
++    stage: assistedAccountSetupState.stage === "ready" ? "ready" : "closed",
++    message: assistedAccountSetupState.stage === "ready"
++      ? "Cuenta confirmada. El perfil persistente esta cerrado."
++      : "La ventana de registro fue cerrada.",
++  };
+   return { ok: true, alreadyClosed: false };
+ }
+ 
+@@ -3147,6 +3259,9 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
+ module.exports = {
+   startLoginSession: startLoginSessionCli,
+   startDashboardLoginSession: startDashboardLoginSessionDetached,
++  startAssistedTikTokAccountSetup,
++  confirmAssistedTikTokAccountSetup,
++  getAssistedAccountSetupStatus,
+   startTempMailSetupSession,
+   retryTempMailCapture,
+   getTempMailSetupStatus,

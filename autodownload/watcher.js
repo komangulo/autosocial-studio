@@ -23,6 +23,7 @@ const fsp = require("fs/promises");
 require("dotenv").config({ path: path.resolve(__dirname, "..", ".env") });
 
 const { config } = require("../src/config");
+const { ytDlpCommand } = require("../src/yt-dlp");
 const {
     getActiveAccount,
     getAccountQueueDirs,
@@ -48,7 +49,8 @@ const PLATFORMS = config.autoDownload.platforms;
 const ACCOUNT_ARG = getArg("account", process.env.ACCOUNT_ID || "");
 
 const BASE_DIR = __dirname;
-const YT_DLP = path.join(BASE_DIR, "yt-dlp.exe");
+// Use the shared absolute resolver so startup does not depend on the cwd.
+const YT_DLP = ytDlpCommand();
 const DOWNLOADS = path.join(BASE_DIR, "downloads");
 const ARCHIVE = path.join(BASE_DIR, "archive.txt");
 

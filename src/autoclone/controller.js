@@ -253,6 +253,201 @@ class AutoCloneController extends EventEmitter {
     return { ...history, count: history.downloadedIds.length };
   }
 
+  // __DATE_PREFIX_FILENAMES_V2__
+  // Fecha YYYY-MM-DD del video. Se lee del .info.json de yt-dlp (upload_date en
+  // formato YYYYMMDD, o timestamp en segundos). El .meta.json queda de respaldo.
+  async _datePrefixFor(videoPath) {
+    const { getMetaPath } = require("../queue");
+    const parsed = path.parse(videoPath);
+
+    try {
+      const infoPath = path.join(parsed.dir, `${parsed.name}.info.json`);
+      const info = JSON.parse(await fs.readFile(infoPath, "utf8"));
+      const rawDate = String(info?.upload_date || "").trim();
+      if (/^\d{8}$/.test(rawDate)) {
+        return `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`;
+      }
+      const epoch = Number(info?.timestamp);
+      if (Number.isFinite(epoch) && epoch > 0) {
+        return new Date(epoch * 1000).toISOString().slice(0, 10);
+      }
+    } catch {
+      // Sin .info.json probamos el .meta.json.
+    }
+
+    try {
+      const meta = JSON.parse(await fs.readFile(getMetaPath(videoPath), "utf8"));
+      const raw = String(meta?.uploadedAt || "").trim();
+      if (!raw) return "";
+      const date = new Date(raw);
+      if (Number.isNaN(date.getTime())) return raw.slice(0, 10);
+      return date.toISOString().slice(0, 10);
+    } catch {
+      return "";
+    }
+  }
+
+  // Renombra "ID.ext" -> "YYYY-MM-DD_ID.ext" junto con sus companeros
+  // (.info.json, .meta.json, portada y subtitulos). Si no hay fecha, no toca nada.
+  async _renameWithDatePrefix(videoPath) {
+    const datePrefix = await this._datePrefixFor(videoPath);
+    if (!datePrefix) return videoPath;
+    return this._renameGroup(videoPath, datePrefix);
+  }
+
+  async _renameGroup(videoPath, datePrefix) {
+    const fsPromises = require("fs/promises");
+    const fileExists = async (candidate) => {
+      try { await fsPromises.access(candidate); return true; } catch { return false; }
+    };
+    const parsed = path.parse(videoPath);
+    const base = parsed.name;
+    if (base.startsWith(datePrefix + "_")) return videoPath;
+
+    let newName = `${datePrefix}_${base}${parsed.ext}`;
+    let suffix = 0;
+    while (await fileExists(path.join(parsed.dir, newName))) {
+      if (path.join(parsed.dir, newName) === videoPath) break;
+      suffix += 1;
+      newName = `${datePrefix}_${base} (${suffix})${parsed.ext}`;
+    }
+
+    const targetPath = path.join(parsed.dir, newName);
+    if (targetPath === videoPath) return videoPath;
+
+    const companions = [
+      `${base}.info.json`,
+      `${base}.meta.json`,
+      `${base}.description`,
+      `${base}.txt`,
+    ];
+    const thumbExts = [".jpg", ".jpeg", ".png", ".webp", ".avif"];
+    for (const ext of thumbExts) companions.push(`${base}${ext}`);
+
+    const newBase = path.parse(newName).name;
+    const newCompanions = [
+      `${newBase}.info.json`,
+      `${newBase}.meta.json`,
+      `${newBase}.description`,
+      `${newBase}.txt`,
+    ];
+    for (const ext of thumbExts) newCompanions.push(`${newBase}${ext}`);
+
+    try {
+      await fsPromises.rename(videoPath, targetPath);
+    } catch {
+      return videoPath;
+    }
+    for (let i = 0; i < companions.length; i += 1) {
+      const from = path.join(parsed.dir, companions[i]);
+      const to = path.join(parsed.dir, newCompanions[i]);
+      try { await fsPromises.rename(from, to); } catch { /* el companero no existe */ }
+    }
+    return targetPath;
+  }
+
+  // Recorre una carpeta y pone la fecha delante a todos los videos con fecha.
+  async renameFolderWithDates(folder) {
+    const fsPromises = require("fs/promises");
+    const dir = path.resolve(String(folder || ""));
+    const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+    const videos = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => /\.(mp4|mov|webm|avi|mkv)$/i.test(name))
+      .filter((name) => !/^\d{4}-\d{2}-\d{2}_/.test(name))
+      .map((name) => path.join(dir, name));
+
+    if (!videos.length) {
+      return { folder: dir, renamed: 0, withoutDate: 0, already: true, items: [] };
+    }
+
+    let renamed = 0;
+    let withoutDate = 0;
+    const items = [];
+    for (const videoPath of videos) {
+      const before = path.basename(videoPath);
+      const after = await this._renameWithDatePrefix(videoPath);
+      if (after === videoPath) {
+        withoutDate += 1;
+        items.push({ before, after: before, changed: false });
+      } else {
+        renamed += 1;
+        items.push({ before, after: path.basename(after), changed: true });
+      }
+    }
+    items.sort((a, b) => a.after.localeCompare(b.after));
+    return { folder: dir, renamed, withoutDate, already: false, items };
+  }
+
+  // __ORDER_BY_UPLOAD_DATE__
+  // Relee cada .info.json de una carpeta y reescribe downloadIndex segun la
+  // fecha real de publicacion, para arreglar carpetas ya descargadas.
+  async orderFolderByDate(folder) {
+    const fsPromises = require("fs/promises");
+    const {
+      uploadedAtFromInfoJson,
+      infoJsonPathFor,
+      metaJsonPathFor,
+      INFO_JSON_SUFFIX,
+    } = require("../video-meta");
+    const { getMetaPath } = require("../queue");
+
+    const dir = path.resolve(String(folder || ""));
+    const entries = await fsPromises.readdir(dir, { withFileTypes: true });
+    const videos = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => /\.(mp4|mov|webm|avi|mkv)$/i.test(name))
+      .map((name) => path.join(dir, name));
+
+    if (!videos.length) throw new Error("No hay videos en esa carpeta.");
+
+    const items = [];
+    for (const videoPath of videos) {
+      const infoPath = infoJsonPathFor(videoPath);
+      let uploadedAt = "";
+      let timestamp = Infinity;
+      try {
+        const info = JSON.parse(await fsPromises.readFile(infoPath, "utf8"));
+        uploadedAt = uploadedAtFromInfoJson(info);
+        const epoch = Number(info.timestamp);
+        if (Number.isFinite(epoch) && epoch > 0) timestamp = epoch;
+      } catch {
+        // Sin info.json este video no se puede fechar; se deja al final.
+      }
+      items.push({ videoPath, uploadedAt, timestamp });
+    }
+
+    const conFecha = items.filter((item) => item.uploadedAt);
+    const sinFecha = items.filter((item) => !item.uploadedAt);
+    conFecha.sort((a, b) => a.timestamp - b.timestamp);
+    const ordered = [...conFecha, ...sinFecha.sort((a, b) => a.videoPath.localeCompare(b.videoPath))];
+
+    for (let index = 0; index < ordered.length; index += 1) {
+      const { videoPath, uploadedAt } = ordered[index];
+      const metaPath = getMetaPath(videoPath);
+      let meta = {};
+      try { meta = JSON.parse(await fsPromises.readFile(metaPath, "utf8")); } catch { meta = {}; }
+      if (!meta || typeof meta !== "object") meta = {};
+      meta.downloadIndex = index;
+      if (uploadedAt) meta.uploadedAt = uploadedAt;
+      await writeJson(metaPath, meta);
+    }
+
+    return {
+      folder: dir,
+      total: ordered.length,
+      withDate: conFecha.length,
+      withoutDate: sinFecha.length,
+      order: ordered.map((item, index) => ({
+        index,
+        name: path.basename(item.videoPath),
+        uploadedAt: item.uploadedAt || null,
+      })),
+    };
+  }
+
   /** Forget the download memory of one profile, so the next run starts over. */
   async resetHistory(handle) {
     const target = normalizeHandle(handle);
@@ -429,6 +624,8 @@ class AutoCloneController extends EventEmitter {
         downloadThumbnail: options.downloadThumbnail === true,
         downloadOrder: options.downloadOrder === "recent" ? "recent" : "oldest",
         startMode: options.startMode === "restart" ? "restart" : "continue",
+        // __ORIGINAL_DOWNLOAD_MODE__ Solo descarga: ni analisis, ni subtitulos, ni uniquify.
+        downloadOnly: options.downloadOnly === true,
         karaoke: options.karaoke === true,
         destinationRoot: destinationRoot ? path.resolve(destinationRoot) : "",
       },
@@ -465,6 +662,27 @@ class AutoCloneController extends EventEmitter {
   async _run(job) {
     const ai = await this._aiSettings();
     try {
+      // 0) Original-only download: no analysis, no processing. -----------
+      if (job.options.downloadOnly) {
+        this._report("download", "Modo solo descarga: bajando los videos originales sin modificar.", { percent: 5 });
+        const originals = await this._downloadAll(job, ai);
+        if (this.cancelRequested) throw new Error("Ejecucion cancelada.");
+        if (!originals.length) throw new Error("No se pudo descargar ningun video del perfil.");
+
+        // __DATE_PREFIX_IN_DOWNLOAD_ONLY__ El renombrado ya ocurre en _downloadAll.
+        job.status = "done";
+        job.finishedAt = nowIso();
+        job.folder = this._userDir(job);
+        job.videos = originals.map((video) => ({ ...video, status: "done" }));
+        await this._saveJob(job);
+        this._report(
+          "done",
+          `Descarga original completada: ${job.videos.length} videos sin modificar. Guardados en ${job.folder}`,
+          { percent: 100, jobId: job.id, folder: job.folder }
+        );
+        return;
+      }
+
       // 1) Competitor analysis -------------------------------------------
       if (job.singleVideo) {
         // A single video has no profile to analyse; skip straight to download.
@@ -550,7 +768,7 @@ class AutoCloneController extends EventEmitter {
         `No se encontro yt-dlp. Coloca yt-dlp.exe en ${path.dirname(ytDlp)} o define YTDLP_PATH en .env.`
       );
     }
-    const downloadDir = this._downloadDir(job);
+    const downloadDir = job.options.downloadOnly ? this._userDir(job) : this._downloadDir(job);
     await fs.mkdir(downloadDir, { recursive: true });
 
     // Single video: download exactly the requested URL, no profile listing.
@@ -658,7 +876,7 @@ class AutoCloneController extends EventEmitter {
     for (let index = 0; index < selected.length; index += 1) {
       if (this.cancelRequested) break;
       const id = selected[index];
-      const target = path.join(downloadDir, `${id}.mp4`);
+      let target = path.join(downloadDir, `${id}.mp4`);
       this._report("download", `Descargando video ${index + 1}/${selected.length}...`, { percent: 15 });
       try {
         const downloadArgs = [
@@ -692,7 +910,10 @@ class AutoCloneController extends EventEmitter {
           this._report("download-warning", `No se encontro la portada del video ${id}; se usara la portada de TikTok al publicar.`, {});
         }
         await this._stampDownloadIndex(target, index);
-        videos.push({ id, sourcePath: target, sizeBytes: stat.size, status: "pending", downloadIndex: index, hasThumbnail: Boolean(thumbnailPath) });
+        await this._stampUploadedAt(target, infoJsonPathFor(target)); // __ORDER_BY_UPLOAD_DATE__
+        target = await this._renameWithDatePrefix(target); // __DATE_PREFIX_FILENAMES__
+        const finalStat = await fs.stat(target).catch(() => null);
+        videos.push({ id, sourcePath: target, sizeBytes: finalStat?.size || stat.size, status: "pending", downloadIndex: index, hasThumbnail: Boolean(thumbnailPath) });
       } catch (error) {
         this._report("download-warning", `No se pudo descargar el video ${id}: ${error.message}`, {});
       }
@@ -784,7 +1005,7 @@ class AutoCloneController extends EventEmitter {
       }
     }
 
-    const outputPath = path.join(this._outputDir(job), `${video.id}${job.options.uniquify ? "_unique" : ""}.mp4`);
+    const outputPath = path.join(this._outputDir(job), `${video.id}${job.options.uniquify && !job.options.downloadOnly ? "_unique" : ""}.mp4`);
     if (job.options.uniquify) {
       onProgress?.({ stage: "uniquify", detail: `Uniquificando el video ${video.id} (${job.options.uniquifyIntensity || "media"})...` });
       await uniquifyVideo(current, outputPath, strengthOptions);
@@ -801,6 +1022,27 @@ class AutoCloneController extends EventEmitter {
     await this._copyMetaSidecar(video.sourcePath, outputPath, video.downloadIndex);
     await this._copyThumbnailSidecar(video.sourcePath, outputPath);
     return { outputPath, outputSizeBytes: stat.size };
+  }
+
+  // __ORDER_BY_UPLOAD_DATE__
+  // Copia la fecha real de publicacion del .info.json al .meta.json para que
+  // la subida programada pueda ordenar de mas antiguo a mas nuevo.
+  async _stampUploadedAt(videoPath, infoJsonPath) {
+    try {
+      const { getMetaPath } = require("../queue");
+      const { uploadedAtFromInfoJson } = require("../video-meta");
+      const info = JSON.parse(await fs.readFile(infoJsonPath, "utf8"));
+      const uploadedAt = uploadedAtFromInfoJson(info);
+      if (!uploadedAt) return;
+      const metaPath = getMetaPath(videoPath);
+      let meta = {};
+      try { meta = JSON.parse(await fs.readFile(metaPath, "utf8")); } catch { meta = {}; }
+      if (!meta || typeof meta !== "object") meta = {};
+      meta.uploadedAt = uploadedAt;
+      await writeJson(metaPath, meta);
+    } catch {
+      // Sin info.json o sin meta no se puede fechar; no es un error fatal.
+    }
   }
 
   async _stampDownloadIndex(videoPath, downloadIndex) {

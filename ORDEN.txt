@@ -1,0 +1,50 @@
+ORDEN DE INSTALACION - AutoSocial Studio
+========================================
+
+Cada instalador crea copias .backup-* y valida la sintaxis antes de guardar.
+
+============================================================
+ARREGLO DE LA FECHA EN EL NOMBRE (lo que te fallaba)
+============================================================
+Ejecuta SOLO este comando. Repara directamente tu controller.js:
+
+node fix-autoclone-date-name.js "C:\Users\msi\Downloads\autosocial-studio"
+
+El fallo era que la fecha se buscaba en el .meta.json, que no la tiene.
+Ahora se lee del .info.json de cada video, que siempre la trae.
+
+Despues:
+  1. Recarga el dashboard con Ctrl+F5.
+  2. En AutoClone escribe tu carpeta de destino.
+  3. Pulsa "Poner fecha en el nombre" para renombrar los ya descargados.
+  4. Las descargas nuevas ya saldran con la fecha solas.
+
+============================================================
+RESTO DE MEJORAS (si no las aplicaste ya)
+============================================================
+
+PASO 1 - Horarios por defecto de TikTok (09:30, 17:40, 22:20)
+node apply-tiktok-default-times.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 2 - Fix del popup "Content may be restricted"
+node apply-tiktok-popup-fix.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 3 - Panel asistido de alta de cuenta TikTok
+node repair-tiktok-account-flow.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 4 - Pestana Google + consentimiento de cookies
+node apply-tiktok-google-tab-v2.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 5 - Boton para eliminar cuentas
+node apply-tiktok-delete-account.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 6 - AutoClone: boton "Descargar videos originales"
+node apply-autoclone-download-only.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 7 - AutoClone: subir de mas antiguos a mas nuevos
+node apply-autoclone-order-by-date.js "C:\Users\msi\Downloads\autosocial-studio"
+
+PASO 8 - AutoClone: fecha en el nombre del video
+node apply-autoclone-date-prefix.js "C:\Users\msi\Downloads\autosocial-studio"
+
+DESPUES DE TODO: recarga el dashboard con Ctrl+F5.

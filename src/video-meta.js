@@ -58,7 +58,33 @@ function normalizeTagList(value) {
  */
 function metaFromInfoJson(info = {}) {
   const description = String(info.description || "").trim();
-  return { description, caption: buildCaptionFromMeta({ description }) };
+  const uploadedAt = uploadedAtFromInfoJson(info);
+  const base = { description, caption: buildCaptionFromMeta({ description }) };
+  // __ORDER_BY_UPLOAD_DATE__
+  // La fecha de subida se guarda para poder ordenar de mas antiguo a mas nuevo.
+  if (uploadedAt) base.uploadedAt = uploadedAt;
+  return base;
+}
+
+// __ORDER_BY_UPLOAD_DATE__
+// Fecha real de publicacion en TikTok. yt-dlp la deja en info.upload_date
+// (formato YYYYMMDD) y en info.timestamp (segundos epoch). Devolvemos un
+// instante ISO, o "" cuando no hay dato.
+function uploadedAtFromInfoJson(info = {}) {
+  const raw = String(info.upload_date || "").trim();
+  if (/^\d{8}$/.test(raw)) {
+    const year = Number(raw.slice(0, 4));
+    const month = Number(raw.slice(4, 6));
+    const day = Number(raw.slice(6, 8));
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  const epoch = Number(info.timestamp);
+  if (Number.isFinite(epoch) && epoch > 0) {
+    const date = new Date(epoch * 1000);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  return "";
 }
 
 function parseTranslationJson(text) {
@@ -256,6 +282,7 @@ async function enrichRecentVideos(rootDir, sinceMs, { logger = null } = {}) {
 }
 
 module.exports = {
+  uploadedAtFromInfoJson, // __ORDER_BY_UPLOAD_DATE__
   INFO_JSON_SUFFIX,
   infoJsonPathFor,
   metaJsonPathFor,

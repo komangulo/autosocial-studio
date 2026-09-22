@@ -1,0 +1,1691 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoSocial Studio</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="vendor/phosphor/style.css" />
+  <link rel="stylesheet" href="studio-assets/studio.css" />
+</head>
+
+<body>
+  <div class="app-container">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">A</div>
+        <div class="brand-meta">
+          <h1>AutoSocial</h1>
+          <div class="brand-account-switcher">
+            <select id="brandSelect" class="control-input brand-select"></select>
+            <button id="addBrandBtn" type="button" class="control-btn-small brand-add-btn" title="Add brand">
+              <i class="ph ph-plus"></i>
+            </button>
+          </div>
+          <div id="brandCreateRow" class="brand-create-row hidden">
+            <input id="brandNameInput" type="text" class="control-input brand-name-input"
+              placeholder="New brand name" />
+            <button id="saveBrandBtn" type="button" class="control-btn-small primary brand-create-btn">
+              Add
+            </button>
+            <button id="cancelBrandBtn" type="button" class="control-btn-small brand-create-btn">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-view="overview">
+          <i class="ph ph-squares-four"></i>
+          <span>Overview</span>
+        </button>
+
+        <div class="nav-label">Create</div>
+        <button class="nav-item" data-view="long-video">
+          <i class="ph ph-film-strip"></i>
+          <span>AI Long Video</span>
+        </button>
+        <button class="nav-item" data-view="helios">
+          <i class="ph ph-images"></i>
+          <span>HeliosGen</span>
+        </button>
+
+        <div class="nav-label">Auto Post</div>
+        <button class="nav-item" data-view="tiktok">
+          <i class="ph ph-tiktok-logo"></i>
+          <span>TikTok</span>
+        </button>
+        <button class="nav-item" data-view="instagram">
+          <i class="ph ph-instagram-logo"></i>
+          <span>Instagram</span>
+        </button>
+        <button class="nav-item" data-view="youtube">
+          <i class="ph ph-youtube-logo"></i>
+          <span>YouTube</span>
+        </button>
+        <button class="nav-item" data-view="google-flow">
+          <i class="ph ph-sparkle"></i>
+          <span>Google Flow</span>
+        </button>
+                <!-- MARKER: ACCTAN-NAV-v1 -->
+        <button class="nav-item" data-view="account-analysis">
+          <i class="ph ph-magnifying-glass-chart"></i>
+          <span>Analisis de cuenta</span>
+        </button>
+<button class="nav-item" data-view="x-autopilot">
+          <i class="ph ph-x-logo"></i>
+          <span>X Autopilot</span>
+        </button>
+
+        <div class="nav-label">Growth</div>
+        <button class="nav-item" data-view="competitor">
+          <i class="ph ph-binoculars"></i>
+          <span>Competencia</span>
+        </button>
+        <button class="nav-item" data-view="autoclone">
+          <i class="ph ph-magic-wand"></i>
+          <span>Auto Clone</span>
+        </button>
+
+        <div class="nav-label">Tools</div>
+        <button class="nav-item" data-view="uniquifier">
+          <i class="ph ph-fingerprint"></i>
+          <span>Video Uniquifier</span>
+        </button>
+        <button class="nav-item" data-view="autodownload">
+          <i class="ph ph-download-simple"></i>
+          <span>Auto Download</span>
+        </button>
+        <button class="nav-item" data-view="profile-download">
+          <i class="ph ph-download"></i>
+          <span>Profile Downloader</span>
+        </button>
+
+        <div class="nav-label">Management</div>
+        <button class="nav-item" data-view="setup">
+          <i class="ph ph-list-checks"></i>
+          <span>Setup</span>
+        </button>
+        <button class="nav-item" data-view="accounts">
+          <i class="ph ph-users"></i>
+          <span>Accounts</span>
+        </button>
+                <!-- MARKER: AICFG-NAV-v1 -->
+        <button class="nav-item" data-view="ai-config">
+          <i class="ph ph-brain"></i>
+          <span>Configuracion IA</span>
+        </button>
+<button class="nav-item" data-view="settings">
+          <i class="ph ph-gear"></i>
+          <span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="connection-status" id="statusBadge">
+          <div class="connection-dot"></div>
+          <span>System Ready</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- View: Overview -->
+      <section id="view-overview" class="view-section active">
+        <header class="view-header">
+          <h2>Dashboard Overview</h2>
+        </header>
+
+        <!-- Totals Row -->
+        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px;">
+          <div class="stat-card">
+            <div class="stat-icon"><i class="ph ph-film-strip"></i></div>
+            <div class="stat-value" id="pendingCount">0</div>
+            <div class="stat-label">Total Pending</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon success"><i class="ph ph-check-circle"></i></div>
+            <div class="stat-value success" id="successCount">0</div>
+            <div class="stat-label">Total Posted</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon error"><i class="ph ph-warning-circle"></i></div>
+            <div class="stat-value error" id="failedCount">0</div>
+            <div class="stat-label">Total Failed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon"><i class="ph ph-users-three"></i></div>
+            <div class="stat-value" id="activeAccountsCount">0</div>
+            <div class="stat-label">Active Schedulers</div>
+          </div>
+        </div>
+
+        <!-- Profiles container (JS populates per-profile sections) -->
+        <div id="overviewProfilesContainer"></div>
+
+        <!-- Recent Logs -->
+        <div class="card full-width" style="margin-top:20px;">
+          <div class="card-title">Live System Logs</div>
+          <div class="logs-container" id="logsContainer">
+            <!-- JS Populates this -->
+          </div>
+        </div>
+      </section>
+
+      <section id="view-long-video" class="view-section studio-host">
+        <div id="longFormStudioRoot"></div>
+      </section>
+
+      <!-- View: HeliosGen -->
+      <section id="view-helios" class="view-section studio-host">
+        <div id="heliosStudioRoot"></div>
+      </section>
+
+      <!-- View: Competencia / Modelado -->
+      <section id="view-competitor" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Competencia / Modelado</h2>
+            <span class="view-subtitle">Analiza un perfil de TikTok con IA y genera tu Prompt Maestro de contenido.</span>
+          </div>
+          <span id="competitorKeyBadge" class="status-badge">Sin API de Gemini</span>
+        </header>
+
+        <div class="competitor-search card">
+          <div class="competitor-input-row">
+            <input id="competitorTarget" class="control-input" type="text"
+              placeholder="@usuario o https://www.tiktok.com/@usuario" />
+            <select id="competitorDepth" class="control-input competitor-depth">
+              <option value="12">12 vídeos</option>
+              <option value="24" selected>24 vídeos</option>
+              <option value="40">40 vídeos</option>
+              <option value="60">60 vídeos</option>
+            </select>
+            <button id="competitorAnalyzeBtn" class="control-btn primary" type="button">
+              <i class="ph ph-magnifying-glass"></i> Analizar
+            </button>
+          </div>
+          <div class="competitor-options">
+            <label>Marca: <input id="competitorBrand" class="control-input" type="text" placeholder="Tu marca (opcional)" /></label>
+            <label>Idioma: <input id="competitorLanguage" class="control-input competitor-lang" type="text" value="es" /></label>
+            <button id="competitorKeyBtn" class="control-btn-small" type="button">Configurar API Gemini</button>
+            <button id="competitorHistoryBtn" class="control-btn-small" type="button">Informes guardados</button>
+          </div>
+          <div id="competitorProgress" class="competitor-progress" hidden></div>
+        </div>
+
+        <div id="competitorKeyPanel" class="competitor-key-panel card" hidden>
+          <div class="card-title">API key de Gemini (Google AI Studio)</div>
+          <p class="form-hint">Se usa para el análisis de texto y visión. Se guarda localmente y nunca sale de tu equipo salvo hacia Google.</p>
+          <div class="helios-key-row">
+            <input id="competitorApiKey" class="control-input" type="password" placeholder="AIza..." />
+            <button id="competitorSaveKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
+            <button id="competitorRemoveKeyBtn" class="control-btn-small danger" type="button">Quitar</button>
+          </div>
+          <div class="helios-key-row">
+            <input id="competitorModel" class="control-input" type="text" placeholder="Modelo (ej. gemini-3.6-flash)" />
+            <button id="competitorModelsBtn" class="control-btn-small" type="button">Ver modelos disponibles</button>
+            <button id="competitorSaveModelBtn" class="control-btn-small primary" type="button">Guardar modelo</button>
+          </div>
+          <p class="helios-hint" id="competitorKeyStatus"></p>
+          <p class="helios-hint" id="competitorModelStatus"></p>
+        </div>
+
+        <div id="competitorReportsList" class="competitor-reports card" hidden></div>
+
+        <div id="competitorResult" class="competitor-result" hidden></div>
+      </section>
+
+      <!-- View: Auto Clone -->
+      <section id="view-autoclone" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Auto Clone</h2>
+            <span class="view-subtitle">Un solo clic: analiza el perfil, descarga todos sus vídeos, traduce el texto en pantalla al español y uniquifica cada vídeo.</span>
+          </div>
+          <span id="autocloneKeyBadge" class="status-badge">Sin API de IA</span>
+        </header>
+
+        <div class="autoclone-hero card">
+          <div class="autoclone-video-row">
+            <input id="autocloneVideoUrl" class="control-input autoclone-video-url" type="text"
+              placeholder="Pega la URL de un vídeo concreto (ej. https://www.tiktok.com/@usuario/video/123...) — opcional" />
+            <button id="autocloneVideoBtn" class="control-btn primary autoclone-video-go" type="button">
+              <i class="ph ph-film-slate"></i> Clonar este vídeo
+            </button>
+          </div>
+          <p id="autocloneVideoHint" class="autoclone-video-hint">Si pegas una URL de vídeo aquí, se clona <b>solo ese vídeo</b> y se ignora el usuario de abajo.</p>
+          <div class="autoclone-input-row">
+            <input id="autocloneUsername" class="control-input autoclone-username" type="text"
+              placeholder="@usuario de TikTok  (ej. @usuario o https://www.tiktok.com/@usuario)" />
+            <button id="autocloneStartBtn" class="control-btn primary autoclone-go" type="button">
+              <i class="ph ph-lightning"></i> Clonar ahora
+            </button>
+            <button id="autocloneDownloadOnlyBtn" class="control-btn autoclone-go" type="button"
+              title="Descarga los videos originales sin subtitulos, sin uniquificar y sin analizar el perfil">
+              <i class="ph ph-download-simple"></i> Descargar videos originales
+            </button>
+          </div>
+          <div class="autoclone-destination">
+            <label for="autocloneDestination">Carpeta de destino</label>
+            <div class="autoclone-destination-row">
+              <input id="autocloneDestination" class="control-input autoclone-dest-input" type="text"
+                placeholder="Ej. C:\Videos\TikTok  o  /home/usuario/Videos  (vacío = carpeta interna)" />
+              <button id="autocloneOpenFolderBtn" class="control-btn-small" type="button" title="Abrir la carpeta de destino">
+                <i class="ph ph-folder-open"></i> Abrir
+              </button>
+            </div>
+            <p id="autocloneDestHint" class="autoclone-dest-hint">Cada usuario tendrá su propia subcarpeta (p. ej. <b>jayandrews69</b>) con todos sus vídeos.</p>
+          </div>
+          <div class="autoclone-options">
+            <label>Máx. vídeos: <input id="autocloneMaxVideos" class="control-input autoclone-num" type="number" min="0" value="0" placeholder="0 = todos" /></label>
+            <label>Orden de descarga:
+              <select id="autocloneDownloadOrder" class="control-input">
+                <option value="oldest" selected>Más antiguos primero</option>
+                <option value="recent">Más recientes primero</option>
+              </select>
+            </label>
+            <label>Empezar desde:
+              <select id="autocloneStartMode" class="control-input">
+                <option value="continue" selected>Donde lo dejé (siguientes)</option>
+                <option value="restart">Empezar de nuevo (desde el primero)</option>
+              </select>
+            </label>
+            <button id="autocloneRenameByDateBtn" class="control-btn-small" type="button"
+              title="Pone la fecha real delante del nombre de cada vídeo ya descargado (ej. 2024-01-15_7643421855751228694.mp4)">
+              <i class="ph ph-text-aa"></i> Poner fecha en el nombre
+            </button>
+            <button id="autocloneResetHistoryBtn" class="control-btn-small" type="button" title="Olvidar los vídeos ya descargados de este perfil">
+              <i class="ph ph-arrow-counter-clockwise"></i> Reiniciar contador
+            </button>
+            <label>Intensidad uniquifier:
+              <select id="autocloneIntensity" class="control-input">
+                <option value="suave">Suave - recorte 2%</option>
+                <option value="media" selected>Media - recorte 4% + espejo</option>
+                <option value="fuerte">Fuerte - recorte 6% + espejo</option>
+              </select>
+            </label>
+            <label>Idioma del título y descripción:
+              <select id="autocloneMetadataLanguage" class="control-input">
+                <option value="es" selected>Español</option>
+                <option value="original">Original</option>
+              </select>
+            </label>
+            <label class="autoclone-check"><input id="autocloneUniquify" type="checkbox" checked /> Uniquificar</label>
+            <label class="autoclone-check"><input id="autocloneTranslate" type="checkbox" checked /> Traducir texto en pantalla</label>
+            <label class="autoclone-check" title="El texto traducido aparece en el mismo sitio que el original, con la palabra activa resaltada en amarillo sobre fondo negro">
+              <input id="autocloneKaraoke" type="checkbox" /> Subtítulos karaoke (amarillo sobre negro)
+            </label>
+            <label class="autoclone-check"><input id="autocloneDownloadThumbnail" type="checkbox" /> Descargar y usar la portada original del vídeo</label>
+            <button id="autocloneKeyBtn" class="control-btn-small" type="button">Configurar API key</button>
+            <button id="autocloneCancelBtn" class="control-btn-small danger" type="button" hidden>Cancelar</button>
+          </div>
+        </div>
+
+        <div id="autocloneKeyPanel" class="competitor-key-panel card" hidden>
+          <div class="card-title">API key de Gemini (Google AI Studio)</div>
+          <p class="form-hint">Se comparte con la sección Competencia. Se usa para traducir el texto en pantalla. Se guarda localmente.</p>
+          <div class="helios-key-row">
+            <input id="autocloneApiKey" class="control-input" type="password" placeholder="AIza..." />
+            <button id="autocloneSaveKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
+          </div>
+          <p class="helios-hint" id="autocloneKeyStatus"></p>
+
+          <div class="card-title" style="margin-top:18px;">API key de DeepSeek (4.1 Flash)</div>
+          <p class="form-hint">Se usa cuando se agota la cuota gratis de Gemini. En vision sale ~6.7x mas barato que Gemini de pago. Se guarda localmente.</p>
+          <div class="helios-key-row">
+            <input id="autocloneDeepSeekKey" class="control-input" type="password" placeholder="sk-..." />
+            <button id="autocloneSaveDeepSeekKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
+          </div>
+          <p class="helios-hint" id="autocloneDeepSeekStatus"></p>
+
+          <div class="card-title" style="margin-top:18px;">API key de xKiro (rotacion gratuita)</div>
+          <p class="form-hint">Rota entre 4 modelos gratis de xKiro antes de gastar cuota de Gemini. Pega la clave de https://api.xkiro.com. Se guarda localmente.</p>
+          <div class="helios-key-row">
+            <input id="autocloneXKiroKey" class="control-input" type="password" placeholder="sk-..." />
+            <button id="autocloneSaveXKiroKeyBtn" class="control-btn-small primary" type="button">Guardar</button>
+          </div>
+          <p class="helios-hint" id="autocloneXKiroStatus"></p> <!-- XKC[html] -->
+        </div> // DS[ui-panel]
+
+        <div class="autoclone-main">
+          <div class="card autoclone-progress-card">
+            <div class="card-title">Progreso</div>
+            <div class="autoclone-bar"><div id="autocloneBarFill" class="autoclone-bar-fill"></div></div>
+            <p id="autocloneStage" class="autoclone-stage">Listo. Escribe un usuario y pulsa «Clonar ahora».</p>
+          </div>
+          <div class="card autoclone-model-card">
+            <div class="card-title">Modelo en uso ahora</div>
+            <div id="autocloneModeloActivo" class="autoclone-modelo">
+              <span class="autoclone-modelo-prov">—</span>
+              <span class="autoclone-modelo-id">Sin actividad</span>
+            </div>
+            <p id="autocloneModeloDetalle" class="helios-hint">Cuando empiece el trabajo, aqui vera que modelo esta leyendo los fotogramas en ese instante.</p>
+            <div id="autocloneModeloHistorial" class="autoclone-modelo-hist"></div>
+          </div> <!-- XKI[indicador][html] -->
+          <div class="card autoclone-videos-card">
+            <div class="card-title">Vídeos procesados</div>
+            <div id="autocloneVideos" class="autoclone-videos">
+              <p class="autoclone-empty">Aún no hay vídeos en este lote.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="autocloneAnalysis" class="competitor-result" hidden></div>
+      </section>
+
+      <!-- View: Accounts -->
+      <section id="view-setup" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>First-Run Setup</h2>
+            <span class="view-subtitle">Check your local machine, login sessions, and queue folders.</span>
+          </div>
+          <button id="setupRefreshBtn" class="control-btn-small">
+            <i class="ph ph-arrows-clockwise"></i> Refresh
+          </button>
+        </header>
+
+        <div class="setup-layout">
+          <div class="setup-summary-card">
+            <div class="setup-summary-icon" id="setupSummaryIcon">
+              <i class="ph ph-circle-notch"></i>
+            </div>
+            <div>
+              <div class="setup-summary-label">Setup status</div>
+              <div class="setup-summary-title" id="setupSummaryTitle">Checking local setup</div>
+              <div class="setup-summary-meta" id="setupSummaryMeta">This runs local checks only.</div>
+            </div>
+          </div>
+
+          <div class="setup-metrics" id="setupMetrics">
+            <div class="setup-metric">
+              <span class="setup-metric-value">-</span>
+              <span class="setup-metric-label">Ready</span>
+            </div>
+            <div class="setup-metric">
+              <span class="setup-metric-value">-</span>
+              <span class="setup-metric-label">Warnings</span>
+            </div>
+            <div class="setup-metric">
+              <span class="setup-metric-value">-</span>
+              <span class="setup-metric-label">Blocking</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="setup-grid">
+          <div class="card setup-card">
+            <div class="card-title">Local Health</div>
+            <div id="setupChecksList" class="setup-check-list">
+              <div class="setup-empty">Loading setup checks...</div>
+            </div>
+          </div>
+
+          <div class="card setup-card">
+            <div class="card-title">Login Sessions</div>
+            <div id="setupSessionsList" class="setup-check-list">
+              <div class="setup-empty">Loading sessions...</div>
+            </div>
+          </div>
+
+          <div class="card setup-card full-width">
+            <div class="card-title">Where to Put Videos</div>
+            <div id="setupFoldersList" class="setup-folder-list">
+              <div class="setup-empty">Loading folders...</div>
+            </div>
+          </div>
+
+          <div class="card setup-card full-width">
+            <div class="card-title">Suggested First Run</div>
+            <div id="setupNextSteps" class="setup-steps">
+              <div class="setup-empty">Loading next steps...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-accounts" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>TikTok Account Manager</h2>
+            <span class="view-subtitle">Registro asistido y un perfil persistente de Chromium por cuenta.</span>
+          </div>
+          <button id="createTikTokAccountBtn" class="control-btn-small primary account-create-button">
+            <i class="ph ph-plus-circle"></i> Crear cuenta TikTok
+          </button>
+        </header>
+
+        <div class="card account-vault-summary">
+          <div>
+            <div class="card-title">Sesiones locales protegidas</div>
+            <p id="accountVaultMessage" class="form-hint">Cada cuenta usa un perfil persistente separado. Completa el registro manualmente con tus datos reales.</p>
+          </div>
+          <span class="status-badge active">Registro manual</span>
+        </div>
+
+        <div id="accountOnboardingPanel" class="card account-onboarding-panel hidden">
+          <div class="card-header">
+            <div class="card-title">Crear cuenta TikTok de forma asistida</div>
+            <span id="accountOnboardingBadge" class="status-badge">Idle</span>
+          </div>
+          <label class="form-hint" for="newTikTokAccountName">Nombre interno de la cuenta</label>
+          <input id="newTikTokAccountName" class="control-input" type="text" maxlength="60" placeholder="Ej. TikTok marca principal" />
+          <p id="accountOnboardingMessage" class="form-hint"></p>
+          <div class="account-action-row">
+            <button id="accountConfirmSetupBtn" class="control-btn-small"><i class="ph ph-check-circle"></i> Comprobar cuenta terminada</button>
+            <button id="accountCloseBrowserBtn" class="control-btn-small danger"><i class="ph ph-x-circle"></i> Close Chromium</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">All TikTok accounts</div>
+          <div class="account-table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Local account</th>
+                  <th>Browser profile</th>
+                  <th>Session</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="managedAccountsTableBody">
+                <tr><td colspan="5">Loading accounts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div class="card-title">Current account platform sessions <span id="activeBrandLabel" style="color:var(--text-muted); font-size:14px;"></span></div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th>Session</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="accountsTableBody">
+              <!-- JS Populates this -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- View: TikTok -->
+      <section id="view-tiktok" class="view-section">
+        <header class="view-header">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="brand-icon"
+              style="background:linear-gradient(135deg, #00f2ea, #ff0050); width:40px; height:40px; font-size:24px;"><i
+                class="ph ph-tiktok-logo"></i></div>
+            <div>
+              <h2 style="margin:0;">TikTok Auto Post</h2>
+              <span style="color:var(--text-muted); font-size:13px;">Manage your TikTok schedule and queue</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="ttLoginBtn" class="control-btn-small primary"><i class="ph ph-browser"></i> Iniciar sesión en TikTok</button>
+            <button id="ttRunBtn" class="control-btn-small primary"><i class="ph ph-play"></i> Run Once</button>
+            <button id="ttStartBtn" class="control-btn-small success"><i class="ph ph-play-circle"></i> Start</button>
+            <button id="ttStopBtn" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Stop</button>
+          </div>
+        </header>
+
+        <div id="ttLoginBanner" class="tt-login-banner card" hidden>
+          <div class="tt-login-row">
+            <span class="tt-login-icon"><i class="ph ph-browser"></i></span>
+            <div class="tt-login-text">
+              <strong id="ttLoginTitle">Sesión de TikTok</strong>
+              <span id="ttLoginMessage">Pulsa «Iniciar sesión en TikTok» para abrir Chromium e iniciar sesión con tu cuenta.</span>
+            </div>
+            <span id="ttLoginStateBadge" class="status-badge">Sin comprobar</span>
+            <button id="ttLoginCheckBtn" class="control-btn-small"><i class="ph ph-arrows-clockwise"></i> Comprobar</button>
+            <button id="ttLoginCloseBtn" class="control-btn-small danger"><i class="ph ph-x"></i> Cerrar ventana</button>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="stats-cards">
+            <div class="stat-card">
+              <div class="stat-value" id="ttPendingCount">-</div>
+              <div class="stat-label">Pending TikToks</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value success" id="ttPostedCount">-</div>
+              <div class="stat-label">Posted Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value error" id="ttFailedCount">-</div>
+              <div class="stat-label">Failed Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="ttSchedulerState">-</div>
+              <div class="stat-label">Scheduler State</div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">TikTok Scheduler</div>
+            <div class="input-group" style="margin-bottom:10px; flex-wrap:wrap;">
+              <select id="ttPlanType" class="control-input" style="max-width:180px;">
+                <option value="once">Once (run now)</option>
+                <option value="daily" selected>Daily</option>
+                <option value="dailyTimes">Daily at specific times</option>
+                <option value="weekly">Weekly</option>
+                <option value="every2h">Every 2 hours</option>
+                <option value="every3h">Every 3 hours</option>
+                <option value="every4h">Every 4 hours</option>
+                <option value="every6h">Every 6 hours</option>
+                <option value="every8h">Every 8 hours</option>
+                <option value="every12h">Every 12 hours</option>
+                <option value="custom">Custom Cron</option>
+              </select>
+              <input id="ttPlanTime" type="time" class="control-input" value="12:00" style="max-width:140px;">
+              <input id="ttPlanTimes" type="text" class="control-input" placeholder="e.g. 09:30, 13:15, 20:45"
+                style="display:none; min-width:260px;">
+              <select id="ttPlanWeekday" class="control-input" style="max-width:160px; display:none;">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+              <button id="ttPlanApplyBtn" class="control-btn-small primary">Apply</button>
+            </div>
+            <div class="input-group">
+              <input type="text" id="ttCronInput" class="control-input" placeholder="0 */2 * * *">
+              <button id="ttUpdateScheduleBtn" class="control-btn-small">Save Schedule</button>
+            </div>
+            <div
+              style="display:flex; gap:18px; margin-top:12px; flex-wrap:wrap; color:var(--text-muted); font-size:13px;">
+              <span>Timezone: <span id="ttTimezoneLabel" class="mono">UTC</span></span>
+              <span>Last run: <span id="ttLastRunLabel" class="mono">Never</span></span>
+            </div>
+            <div
+              style="display:flex; flex-direction:column; gap:16px; margin-top:16px; border-top:1px solid var(--border-color); padding-top:16px;">
+              <label class="switch-container">
+                <input type="checkbox" id="ttInstantPostToggle">
+                <span class="slider"></span>
+                <span class="switch-label">
+                  <strong>Instant Post Mode</strong>
+                  <div style="font-size:12px; color:var(--text-muted); font-weight:normal;">Skips queue intervals and
+                    Auto-Add Sound to post immediately when video appears in pending folder.</div>
+                </span>
+              </label>
+
+              <label class="switch-container">
+                <input type="checkbox" id="ttAutoAddSoundToggle">
+                <span class="slider"></span>
+                <span class="switch-label">
+                  <strong>Auto-Add Trending Sound</strong>
+                  <div style="font-size:12px; color:var(--text-muted); font-weight:normal;">Automatically searches and
+                    applies a background sound during upload to satisfy TikTok algorithm. (Ignored during Instant Post)
+                  </div>
+                </span>
+              </label>
+
+              <div class="form-group">
+                <label>Sound Search Query</label>
+                <div class="input-group">
+                  <input id="ttSoundQueryInput" type="text" class="control-input"
+                    placeholder="Optional TikTok sound search term">
+                  <button id="ttSoundQuerySaveBtn" class="control-btn-small">
+                    Save Sound
+                  </button>
+                </div>
+              </div>
+
+              <label class="switch-container">
+                <input type="checkbox" id="ttRandomQueueToggle">
+                <span class="slider"></span>
+                <span class="switch-label">
+                  <strong>Random Queue Order (Global)</strong>
+                  <div style="font-size:12px; color:var(--text-muted); font-weight:normal;">Chooses a random pending video each run instead of the first file alphabetically. Captions still stay attached to the selected video.</div>
+                </span>
+              </label>
+            </div>
+
+            <div class="card full-width">
+              <div class="card-title">Schedule one video for an exact date</div>
+              <div class="autonomous-form">
+                <select id="ttJobVideo" class="control-input"><option value="">Select a pending video</option></select>
+                <input id="ttJobDate" type="datetime-local" class="control-input">
+                <input id="ttJobCaption" type="text" class="control-input" placeholder="Optional caption override">
+                <button id="ttJobCreateBtn" class="control-btn-small primary">Schedule video</button>
+              </div>
+              <p id="ttJobMessage" class="form-hint">The video is reserved immediately and survives application or PC restarts.</p>
+            </div>
+
+            <div class="card full-width">
+              <div class="card-header"><div class="card-title">Autonomous Jobs</div><span id="autonomousWorkerBadge" class="status-badge">Starting</span></div>
+              <div id="autonomousJobsList" class="autonomous-jobs"></div>
+            </div>
+
+            <div class="card full-width queue-card">
+              <div class="queue-card-header">
+                <div class="card-title">TikTok Queue</div>
+                <span id="ttQueueCount" class="status-badge queue-count">0 pending</span>
+              </div>
+              <div class="queue-list queue-list-tiktok" id="ttQueueList"></div>
+            </div>
+
+            <div class="card full-width">
+              <div class="card-header">
+                <div class="card-title">Auto Post desde carpeta (Auto Clone)</div>
+                <span id="apAccountBadge" class="status-badge">Sin cuenta</span>
+              </div>
+              <p class="form-hint">Elige la carpeta donde Auto Clone deja los vídeos. La app los repartirá en los días y horas que elijas y los publicará sola, pulsando los botones de TikTok.</p>
+              <p class="form-hint">Cada vídeo usa su propio texto: el <strong>título</strong>, la <strong>descripción</strong> y los <strong>hashtags</strong> que trae en su archivo <code>.meta.json</code> (se crean al descargar el perfil). Los hashtags y el texto del caption de abajo se añaden <strong>encima</strong> de los propios del vídeo.</p>
+              <div class="autopost-folder">
+                <input id="apFolder" class="control-input autopost-folder-input" type="text" placeholder="Carpeta de vídeos (ej. C:\Videos\TikTok\jayandrews69)" />
+                <button id="apChooseBtn" class="control-btn-small"><i class="ph ph-folder-open"></i> Elegir carpeta…</button>
+                <button id="apLoadBtn" class="control-btn-small"><i class="ph ph-arrows-clockwise"></i> Cargar vídeos</button>
+                <button id="apUseDestBtn" class="control-btn-small"><i class="ph ph-magic-wand"></i> Usar carpeta de destino</button>
+              </div>
+              <div class="autopost-days" id="apDays">
+                <label class="autopost-day"><input type="checkbox" value="mon" checked> Lun</label>
+                <label class="autopost-day"><input type="checkbox" value="tue" checked> Mar</label>
+                <label class="autopost-day"><input type="checkbox" value="wed" checked> Mié</label>
+                <label class="autopost-day"><input type="checkbox" value="thu" checked> Jue</label>
+                <label class="autopost-day"><input type="checkbox" value="fri" checked> Vie</label>
+                <label class="autopost-day"><input type="checkbox" value="sat" checked> Sáb</label>
+                <label class="autopost-day"><input type="checkbox" value="sun" checked> Dom</label>
+              </div>
+              <div class="autopost-row">
+                <label>Horas del día: <input id="apTimes" type="text" class="control-input" value="09:30, 17:40, 22:20" placeholder="09:30, 13:15, 20:45" /></label>
+                <label>Máx. vídeos: <input id="apMax" type="number" min="0" class="control-input autopost-num" value="0" placeholder="0 = todos" /></label>
+                <label>Zona horaria: <input id="apTimezone" type="text" class="control-input autopost-tz" placeholder="Europe/Madrid" /></label>
+              </div>
+              <div class="autopost-row">
+                <label style="flex:1;">Texto del caption (opcional): <input id="apCaption" type="text" class="control-input" placeholder="Ej. Mira esto 👀  {usuario} · {video}" /></label>
+              </div>
+              <div class="autopost-row">
+                <label style="flex:1;">Hashtags para los vídeos (opcional): <input id="apHashtags" type="text" class="control-input" placeholder="Ej. viral, parati, madrid  (sin # o con #, separados por espacios)" /></label>
+              </div>
+              <div class="autopost-row autopost-location-row">
+                <label class="autopost-location-label">
+                  <input id="apLocationMadrid" type="checkbox" />
+                  <span>Localización: poner <strong>Madrid, Spain</strong> en todos los vídeos</span>
+                </label>
+                <label style="flex:1;">Otra localización (opcional): <input id="apLocationCustom" type="text" class="control-input" placeholder="Ej. Barcelona, Spain" /></label>
+              </div>
+              <div class="autopost-row">
+                <label class="autopost-location-label">
+                  <input id="apAiGenerated" type="checkbox" />
+                  <span>Marcar los vídeos como <strong>contenido generado con IA</strong> en TikTok</span>
+                </label>
+              </div>
+              <div class="autopost-actions">
+                <button id="apPreviewBtn" class="control-btn-small">Ver programación</button>
+                <button id="apScheduleBtn" class="control-btn-small">Guardar en cola</button>
+                <button id="apStartBtn" class="control-btn primary">Programar todo en TikTok ahora</button>
+                <button id="apStopBtn" class="control-btn-small danger">Parar</button>
+              </div>
+              <p id="apMessage" class="form-hint">Elige la carpeta, los días y las horas. Pulsa «Programar todo en TikTok ahora» y la app subirá y programará cada vídeo uno detrás de otro. Después puedes apagar el PC.</p>
+              <div id="apPlan" class="autopost-plan"></div>
+              <div class="autopost-actions" style="margin-top:10px">
+                <button id="apLogBtn" class="control-btn-small">Ver registro de depuración</button>
+                <button id="apLogCopyBtn" class="control-btn-small">Copiar registro</button>
+              </div>
+              <textarea id="apLogBox" class="control-input" readonly style="width:100%; min-height:180px; font-family:monospace; font-size:12px; margin-top:8px; display:none; white-space:pre; overflow:auto"></textarea>
+            </div>
+
+            <div class="card full-width">
+              <div class="card-title">TikTok Live Logs</div>
+              <div class="logs-container" id="ttLogsContainer"></div>
+            </div>
+          </div>
+      </section>
+
+      <!-- View: Instagram -->
+      <section id="view-instagram" class="view-section">
+        <header class="view-header">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="brand-icon"
+              style="background:linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045); width:40px; height:40px; font-size:24px;">
+              <i class="ph ph-instagram-logo"></i>
+            </div>
+            <div>
+              <h2 style="margin:0;">Instagram Reels</h2>
+              <span style="color:var(--text-muted); font-size:13px;">Manage your Reels schedule</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="igRunBtn" class="control-btn-small primary"><i class="ph ph-play"></i> Run Once</button>
+            <button id="igStartBtn" class="control-btn-small success"><i class="ph ph-play-circle"></i> Start</button>
+            <button id="igStopBtn" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Stop</button>
+          </div>
+        </header>
+
+        <div class="dashboard-grid">
+          <div class="stats-cards">
+            <div class="stat-card">
+              <div class="stat-value" id="igPendingCount">-</div>
+              <div class="stat-label">Pending Reels</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value success" id="igPostedCount">-</div>
+              <div class="stat-label">Posted Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value error" id="igFailedCount">-</div>
+              <div class="stat-label">Failed Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="igSchedulerState">-</div>
+              <div class="stat-label">Scheduler State</div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Instagram Scheduler</div>
+            <div class="input-group" style="margin-bottom:10px; flex-wrap:wrap;">
+              <select id="igPlanType" class="control-input" style="max-width:180px;">
+                <option value="once">Once (run now)</option>
+                <option value="daily" selected>Daily</option>
+                <option value="dailyTimes">Daily at specific times</option>
+                <option value="weekly">Weekly</option>
+                <option value="every2h">Every 2 hours</option>
+                <option value="every3h">Every 3 hours</option>
+                <option value="every4h">Every 4 hours</option>
+                <option value="every6h">Every 6 hours</option>
+                <option value="every8h">Every 8 hours</option>
+                <option value="every12h">Every 12 hours</option>
+                <option value="custom">Custom Cron</option>
+              </select>
+              <input id="igPlanTime" type="time" class="control-input" value="12:00" style="max-width:140px;">
+              <input id="igPlanTimes" type="text" class="control-input" placeholder="e.g. 09:30, 13:15, 20:45"
+                style="display:none; min-width:260px;">
+              <select id="igPlanWeekday" class="control-input" style="max-width:160px; display:none;">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+              <button id="igPlanApplyBtn" class="control-btn-small primary">Apply</button>
+            </div>
+            <div class="input-group">
+              <input type="text" id="igCronInput" class="control-input" placeholder="0 */2 * * *">
+              <button id="igUpdateScheduleBtn" class="control-btn-small">Save Schedule</button>
+            </div>
+            <div
+              style="display:flex; gap:18px; margin-top:12px; flex-wrap:wrap; color:var(--text-muted); font-size:13px;">
+              <span>Timezone: <span id="igTimezoneLabel" class="mono">UTC</span></span>
+              <span>Last run: <span id="igLastRunLabel" class="mono">Never</span></span>
+            </div>
+            <div
+              style="display:flex; align-items:center; gap:12px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border-color);">
+              <label class="toggle-switch">
+                <input type="checkbox" id="igInstantPostToggle">
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <div style="font-weight:600; font-size:13px;">Instant Post</div>
+                <div style="color:var(--text-muted); font-size:12px;">Post immediately when a new file lands in the
+                  queue</div>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin-top:12px;">
+              <label class="toggle-switch">
+                <input type="checkbox" id="igRandomQueueToggle">
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <div style="font-weight:600; font-size:13px;">Random Queue Order (Global)</div>
+                <div style="color:var(--text-muted); font-size:12px;">Pick a random pending file each run instead of the first alphabetic one. Captions still follow the chosen video.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Instagram Queue</div>
+            <div class="queue-list" id="igQueueList"></div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Instagram Live Logs</div>
+            <div class="logs-container" id="igLogsContainer"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: YouTube -->
+      <section id="view-youtube" class="view-section">
+        <header class="view-header">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="brand-icon" style="background:#ff0000; width:40px; height:40px; font-size:24px;"><i
+                class="ph ph-youtube-logo"></i></div>
+            <div>
+              <h2 style="margin:0;">YouTube Shorts</h2>
+              <span style="color:var(--text-muted); font-size:13px;">Manage your Shorts schedule</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="ytRunBtn" class="control-btn-small primary"><i class="ph ph-play"></i> Run Once</button>
+            <button id="ytStartBtn" class="control-btn-small success"><i class="ph ph-play-circle"></i> Start</button>
+            <button id="ytStopBtn" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Stop</button>
+          </div>
+        </header>
+
+        <div class="dashboard-grid">
+          <div class="stats-cards">
+            <div class="stat-card">
+              <div class="stat-value" id="ytPendingCount">-</div>
+              <div class="stat-label">Pending Shorts</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value success" id="ytPostedCount">-</div>
+              <div class="stat-label">Posted Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value error" id="ytFailedCount">-</div>
+              <div class="stat-label">Failed Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="ytSchedulerState">-</div>
+              <div class="stat-label">Scheduler State</div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">YouTube Scheduler</div>
+            <div class="input-group" style="margin-bottom:10px; flex-wrap:wrap;">
+              <select id="ytPlanType" class="control-input" style="max-width:180px;">
+                <option value="once">Once (run now)</option>
+                <option value="daily" selected>Daily</option>
+                <option value="dailyTimes">Daily at specific times</option>
+                <option value="weekly">Weekly</option>
+                <option value="every2h">Every 2 hours</option>
+                <option value="every3h">Every 3 hours</option>
+                <option value="every4h">Every 4 hours</option>
+                <option value="every6h">Every 6 hours</option>
+                <option value="every8h">Every 8 hours</option>
+                <option value="every12h">Every 12 hours</option>
+                <option value="custom">Custom Cron</option>
+              </select>
+              <input id="ytPlanTime" type="time" class="control-input" value="12:00" style="max-width:140px;">
+              <input id="ytPlanTimes" type="text" class="control-input" placeholder="e.g. 09:30, 13:15, 20:45"
+                style="display:none; min-width:260px;">
+              <select id="ytPlanWeekday" class="control-input" style="max-width:160px; display:none;">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+              <button id="ytPlanApplyBtn" class="control-btn-small primary">Apply</button>
+            </div>
+            <div class="input-group">
+              <input type="text" id="ytCronInput" class="control-input" placeholder="0 */2 * * *">
+              <button id="ytUpdateScheduleBtn" class="control-btn-small">Save Schedule</button>
+            </div>
+            <div
+              style="display:flex; gap:18px; margin-top:12px; flex-wrap:wrap; color:var(--text-muted); font-size:13px;">
+              <span>Timezone: <span id="ytTimezoneLabel" class="mono">UTC</span></span>
+              <span>Last run: <span id="ytLastRunLabel" class="mono">Never</span></span>
+            </div>
+            <div
+              style="display:flex; align-items:center; gap:12px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border-color);">
+              <label class="toggle-switch">
+                <input type="checkbox" id="ytInstantPostToggle">
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <div style="font-weight:600; font-size:13px;">Instant Post</div>
+                <div style="color:var(--text-muted); font-size:12px;">Post immediately when a new file lands in the
+                  queue</div>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin-top:12px;">
+              <label class="toggle-switch">
+                <input type="checkbox" id="ytRandomQueueToggle">
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <div style="font-weight:600; font-size:13px;">Random Queue Order (Global)</div>
+                <div style="color:var(--text-muted); font-size:12px;">Pick a random pending file each run instead of the first alphabetic one. Captions still follow the chosen video.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">YouTube Queue</div>
+            <div class="queue-list" id="ytQueueList"></div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">YouTube Live Logs</div>
+            <div class="logs-container" id="ytLogsContainer"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Video Uniquifier -->
+      <section id="view-uniquifier" class="view-section">
+        <header class="view-header">
+          <h2>Video Uniquifier</h2>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="uniqStartBtn" class="control-btn-small success">
+              <i class="ph ph-play-circle"></i> Start Uniquifying
+            </button>
+            <button id="uniqStopBtn" class="control-btn-small danger">
+              <i class="ph ph-stop-circle"></i> Stop
+            </button>
+          </div>
+        </header>
+
+        <div class="dashboard-grid">
+          <div class="card full-width">
+            <div class="card-title">Folders</div>
+            <div class="form-group">
+              <label>Input Folder (put original videos here)</label>
+              <div class="input-group">
+                <input id="uniqInputDir" class="control-input" type="text" placeholder="Input folder path">
+                <button id="uniqOpenInputBtn" class="control-btn-small">
+                  <i class="ph ph-folder-open"></i> Open
+                </button>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+              <label>Output Folder (uniquified videos will be saved here)</label>
+              <div class="input-group">
+                <input id="uniqOutputDir" class="control-input" type="text" placeholder="Output folder path">
+                <button id="uniqOpenOutputBtn" class="control-btn-small">
+                  <i class="ph ph-folder-open"></i> Open
+                </button>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:12px;">
+              <label>Logo Image (optional overlay)</label>
+              <input id="uniqLogoImage" class="control-input" type="text"
+                placeholder="user-assets/logo.png or C:\path\to\logo.png">
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Anti-detection (contra contenido duplicado de TikTok)</div>
+            <p class="form-hint" style="margin-top:4px;">
+              La intensidad agrupa las transformaciones que cambian la huella visual del video.
+              Cuanto mas fuerte, mas cambia el encuadre y el tiempo. El audio original se conserva siempre.
+            </p>
+            <div class="form-group" style="margin-top:12px;">
+              <label>Intensidad</label>
+              <select id="uniqIntensity" class="control-input">
+                <option value="suave">Suave - recorte 2%, sin espejo</option>
+                <option value="media" selected>Media - recorte 4% + espejo</option>
+                <option value="fuerte">Fuerte - recorte 6% + espejo</option>
+              </select>
+            </div>
+            <p class="form-hint">Siempre se recortan 0.30 s del inicio y nunca se cambia la velocidad (el audio se conserva).</p>
+            <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+              <div class="form-group">
+                <label>Recorte de encuadre (%)</label>
+                <input id="uniqCropPercent" class="control-input" type="number" min="0" max="15" step="0.5" placeholder="auto (segun intensidad)">
+              </div>
+              <div class="form-group">
+                <label>Ruido (1 - 10)</label>
+                <input id="uniqNoiseStrength" class="control-input" type="number" min="1" max="10" step="1" placeholder="auto (segun intensidad)">
+              </div>
+              <div class="form-group">
+                <label>Opacidad del logo (0.05 - 1)</label>
+                <input id="uniqOverlayOpacity" class="control-input" type="number" min="0.05" max="1" step="0.05" placeholder="0.08 - 0.15">
+              </div>
+              <div class="form-group">
+                <label>Ancho del logo (px)</label>
+                <input id="uniqOverlaySize" class="control-input" type="number" min="40" max="400" step="10" placeholder="60 - 100">
+              </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:12px;">
+              <label class="checkbox-inline"><input type="checkbox" id="uniqMirror"> Espejo horizontal</label>
+            </div>
+          </div>
+
+          <div class="stats-cards">
+            <div class="stat-card">
+              <div class="stat-value" id="uniqState">-</div>
+              <div class="stat-label">Batch State</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="uniqProgress">0 / 0</div>
+              <div class="stat-label">Progress</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value success" id="uniqSucceeded">0</div>
+              <div class="stat-label">Succeeded</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value error" id="uniqFailed">0</div>
+              <div class="stat-label">Failed</div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Input Videos</div>
+            <div class="queue-list" id="uniqInputFiles"></div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Output Videos</div>
+            <div class="queue-list" id="uniqOutputFiles"></div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Uniquifier Logs</div>
+            <div class="logs-container" id="uniqLogs"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View: Settings -->
+      <section id="view-settings" class="view-section">
+        <header class="view-header">
+          <h2>Settings</h2>
+        </header>
+
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-title">Content Defaults</div>
+            <div class="form-group">
+              <label>Default Caption</label>
+              <textarea id="defaultCaptionInput" class="control-input" rows="4"
+                placeholder="Optional fallback caption when no sidecar file exists"></textarea>
+            </div>
+            <button id="defaultCaptionSaveBtn" class="control-btn-small primary" style="margin-top:8px;">
+              <i class="ph ph-floppy-disk"></i> Save Caption
+            </button>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- MARKER: AICFG-UI-v1 -->
+      <section id="view-ai-config" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Configuracion de IA</h2>
+            <span class="view-subtitle">Guarda aqui tus claves una sola vez. Toda la app las usa en este orden automatico: xKiro (gratis) &rarr; Gemini gratis &rarr; DeepSeek (pago) &rarr; Gemini pago &rarr; OpenRouter.</span>
+          </div>
+          <span id="aiChainBadge" class="status-badge">Sin proveedores</span>
+        </header>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Como funciona</div>
+          <p class="form-hint">La app intenta primero xKiro con sus modelos gratuitos. Si falla o se agota, pasa solo al siguiente proveedor. No tienes que hacer nada mas.</p>
+          <div id="aiChainList" class="ai-chain-list"></div>
+          <label class="toggle-line" style="margin-top:14px;">
+            <input id="aiChainEnabled" type="checkbox" checked>
+            <span>Usar la cadena automatica en toda la app</span>
+          </label>
+        </div>
+
+        <div class="settings-grid" id="aiProviderGrid"></div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-title">Probar una clave</div>
+          <p class="form-hint">Hace una llamada real y corta para confirmar que la clave funciona.</p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <select id="aiTestProvider" class="control-input" style="max-width:240px;"></select>
+            <button id="aiTestBtn" class="control-btn-small primary"><i class="ph ph-plug"></i> Probar</button>
+            <span id="aiTestResult" class="form-hint"></span>
+          </div>
+          <p class="form-hint" id="aiLastTest" style="margin-top:8px;"></p>
+        </div>
+      </section>
+
+
+      
+
+
+      
+
+
+      
+
+
+      <!-- MARKER: ACCTAN-UI-v1 -->
+      <section id="view-account-analysis" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Analisis de cuenta</h2>
+            <span class="view-subtitle">Mete cualquier @ de X y la herramienta estudia su forma de comunicar: temas, tono, sentimiento, estructura y ritmo. Guarda varias cuentas y cambia entre ellas cuando quieras.</span>
+          </div>
+          <span id="acctAnalysisBadge" class="status-badge">Sin analisis</span>
+        </header>
+
+        <div id="acctSessionBanner" class="tt-login-banner card" style="margin-bottom:16px;">
+          <div class="tt-login-row">
+            <span class="tt-login-icon"><i class="ph ph-x-logo"></i></span>
+            <div class="tt-login-text">
+              <strong id="acctSessionTitle">Sesion de X</strong>
+              <span id="acctSessionMessage">Necesitas iniciar sesion en X aqui mismo para poder leer los posts de una cuenta.</span>
+            </div>
+            <span id="acctSessionBadge" class="status-badge">Sin sesion</span>
+            <button id="acctLoginBtn" class="control-btn-small primary"><i class="ph ph-browser"></i> Iniciar sesion</button>
+            <button id="acctLoginSaveBtn" class="control-btn-small success"><i class="ph ph-floppy-disk"></i> Guardar sesion</button>
+            <button id="acctLoginCloseBtn" class="control-btn-small danger"><i class="ph ph-x"></i> Cerrar</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Analizar una cuenta</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+            <input id="acctHandle" class="control-input" style="max-width:260px; text-transform:none;" placeholder="@usuario (ej. levelsio)" />
+            <select id="acctMaxPosts" class="control-input" style="max-width:180px;">
+              <option value="50">50 publicaciones</option>
+              <option value="100">100 publicaciones</option>
+              <option value="150" selected>150 publicaciones</option>
+              <option value="200">200 publicaciones</option>
+              <option value="300">300 publicaciones</option>
+            </select>
+            <button id="acctStartBtn" class="control-btn-small primary"><i class="ph ph-play"></i> Analizar</button>
+            <button id="acctRefreshBtn" class="control-btn-small"><i class="ph ph-arrows-clockwise"></i> Actualizar</button>
+          </div>
+          <div id="acctProgressBox" style="display:none; margin-top:14px; padding:12px 14px; border-radius:10px; background:#101c2e; border:1px solid #1e3a63;">
+            <p id="acctProgress" style="font-size:13.5px; color:#9cc3ff; margin:0;"></p>
+          </div>
+        </div>
+
+        <div id="acctSessionWarning" class="card" style="display:none; margin-bottom:16px; border-color:#5c4413; background:#1a1408;">
+          <p style="font-size:13.5px; color:#ffd98a; margin:0;">
+            <b>Antes de analizar necesitas iniciar sesion en X.</b> Usa el boton <b>Iniciar sesion</b> de arriba, entra en tu cuenta en la ventana que se abre y pulsa <b>Guardar sesion</b>.
+          </p>
+        </div>
+
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-title">Cuentas analizadas</div>
+            <div id="acctProfileList" class="x-reference-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-title" id="acctDetailTitle">Detalle</div>
+            <div id="acctDetailBody"><p class="form-hint">Selecciona una cuenta de la lista para ver su analisis.</p></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-title">Manual de ADN</div>
+          <p class="form-hint">Este documento es el molde que usa la IA para escribir. Se guarda por cuenta.</p>
+          // MARKER: ACCTAN-REPORTS-v1
+          <div id="acctReportsBar" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0;">
+            <label class="form-hint" for="acctReportSelect" style="margin:0;">Informe guardado:</label>
+            <select id="acctReportSelect" class="control-input" style="max-width:340px;">
+              <option value="">— Usar el analisis mas reciente —</option>
+            </select>
+            <button id="acctReportLoad" class="control-btn-small primary"><i class="ph ph-folder-open"></i> Cargar informe</button>
+            <button id="acctReportDelete" class="control-btn-small danger"><i class="ph ph-trash"></i> Borrar informe</button>
+          </div>
+          <p id="acctReportsHint" class="form-hint">Cada analisis se guarda con la fecha y la hora. Elige uno anterior para no repetir el analisis.</p>
+          <pre id="acctManual" style="white-space:pre-wrap; font-size:12px; line-height:1.5; max-height:420px; overflow:auto; background:#0d1013; border:1px solid #242a33; border-radius:10px; padding:14px; margin-top:10px;">Selecciona una cuenta para ver su manual.</pre>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <button id="acctUseBtn" class="control-btn-small primary"><i class="ph ph-check"></i> Usar esta cuenta como referencia</button>
+            <button id="acctDeleteBtn" class="control-btn-small danger"><i class="ph ph-trash"></i> Borrar analisis</button>
+          </div>
+        </div>
+
+
+        <div class="card" id="radarCard" style="margin-top:16px;">
+          <!-- MARKER: ACCT-RADAR-UI-v1 -->
+          <div class="card-title"><i class="ph ph-broadcast"></i> Radar de noticias y afiliados</div>
+          <p class="form-hint">El radar escanea X con <b>la sesion con la que ya estas logueado</b> (no hace falta analizar ninguna cuenta) buscando las <b>palabras clave</b> que escribas abajo. Los posts que coincidan se reescriben con IA, sus links de tienda se cambian por <b>tu link de afiliado</b>, y se publican conservando las imagenes del original. Tope diario y sin repetir la misma noticia.</p>
+
+          <label style="display:flex; flex-direction:column; gap:4px; margin-top:12px;">
+            <span class="form-hint">Temas a escanear (uno por linea o separados por comas). Solo se publican posts que contengan alguna de estas palabras.</span>
+            <textarea id="radarKeywords" class="control-input" rows="4" style="width:100%; resize:vertical;" placeholder="One Piece&#10;TCG&#10;One Piece Card Game&#10;Pokemon TCG"></textarea>
+          </label>
+
+          <div class="card-title" style="margin-top:16px; font-size:14px;"><i class="ph ph-link"></i> Mis links de afiliado</div>
+          <p class="form-hint">Pega aqui tus IDs o links. Amazon: tu tag (ej. miweb-21) o el link corto. eBay: tu campaign ID o link. Target: tu afid o link.</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+            <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+              <span class="form-hint">Amazon</span>
+              <input id="radarAmazon" class="control-input" type="text" placeholder="miweb-21  o  https://amzn.to/xxxx" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+              <span class="form-hint">eBay</span>
+              <input id="radarEbay" class="control-input" type="text" placeholder="campaign id  o  https://ebay.us/xxxx" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+              <span class="form-hint">Target</span>
+              <input id="radarTarget" class="control-input" type="text" placeholder="afid  o  https://goto.target.com/xxxx" />
+            </label>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:14px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Maximo de posts al dia</span>
+              <input id="radarMax" class="control-input" type="number" min="1" max="100" value="20" style="max-width:170px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Revisar cada (min)</span>
+              <input id="radarEvery" class="control-input" type="number" min="15" max="1440" value="60" style="max-width:160px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Idioma</span>
+              <select id="radarLang" class="control-input" style="max-width:150px;">
+                <option value="en">Ingles</option>
+                <option value="es">Espanol</option>
+              </select>
+            </label>
+            <label style="display:flex; flex-direction:row; gap:8px; align-items:center; padding-bottom:8px;">
+              <input id="radarOnlyLinks" type="checkbox" />
+              <span class="form-hint">Solo publicar posts que ya lleven un link de tienda</span>
+            </label>
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; align-items:center;">
+            <button id="radarSave" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Guardar ajustes del radar</button>
+            <button id="radarScan" class="control-btn-small"><i class="ph ph-magnifying-glass"></i> Escanear sin publicar</button>
+            <button id="radarRun" class="control-btn-small success"><i class="ph ph-broadcast"></i> Escanear y publicar ahora</button>
+            <button id="radarStop" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Parar radar hoy</button>
+            <span id="radarBadge" class="status-badge">0 / 20 hoy</span>
+          </div>
+          <div id="radarBox" style="display:none; margin-top:12px; padding:12px 14px; border-radius:10px; background:#101c2e; border:1px solid #1e3a63;">
+            <p id="radarMsg" style="font-size:13.5px; color:#9cc3ff; margin:0;"></p>
+          </div>
+          <details style="margin-top:12px;" open>
+            <summary class="form-hint" style="cursor:pointer;">Ultimos posts publicados por el radar</summary>
+            <div id="radarHistory" style="margin-top:10px;"></div>
+          </details>
+        </div>
+
+        <div class="card" id="acctPubCard" style="margin-top:16px;">
+          <!-- MARKER: ACCT-PUB-UI-v1 -->
+          <div class="card-title"><i class="ph ph-calendar-check"></i> Publicacion diaria con este perfil</div>
+          <p class="form-hint">La IA escribira cada dia imitando el estilo de la cuenta seleccionada y publicara en <b>la cuenta de X con la que estas logueado</b>. Elige cuantos tuits y sobre que temas.</p>
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-top:12px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Tuits diarios</span>
+              <input id="acctPubCount" class="control-input" type="number" min="1" max="20" value="3" style="max-width:110px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Primer tuit</span>
+              <input id="acctPubStart" class="control-input" type="time" value="09:00" style="max-width:130px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Minutos entre tuits</span>
+              <input id="acctPubSpread" class="control-input" type="number" min="5" max="1440" value="220" style="max-width:150px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Variacion (min, hasta +/-)</span>
+              <input id="acctPubJitter" class="control-input" type="number" min="0" max="120" value="30" style="max-width:170px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Minimo entre posts (min)</span>
+              <input id="acctPubMinGap" class="control-input" type="number" min="5" max="1440" value="45" style="max-width:170px;" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Idioma de los posts</span>
+              <select id="acctPubLang" class="control-input" style="max-width:150px;">
+                <option value="en">Ingles</option>
+                <option value="es">Espanol</option>
+              </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:4px;">
+              <span class="form-hint">Maximo de caracteres</span>
+              <input id="acctPubMax" class="control-input" type="number" min="80" max="4000" value="280" style="max-width:150px;" />
+            </label>
+          </div>
+          <label style="display:flex; flex-direction:column; gap:4px; margin-top:12px;">
+            <span class="form-hint">Temas de la cuenta (uno por linea o separados por comas). La IA rotara entre ellos; si lo dejas vacio, escribira del estilo general.</span>
+            <textarea id="acctPubTopics" class="control-input" rows="3" style="width:100%; resize:vertical;" placeholder="productividad, IA aplicada, errores de fundador..."></textarea>
+          </label>
+          <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+            <button id="acctPubSave" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Guardar ajustes</button>
+            <button id="acctPubToggle" class="control-btn-small success"><i class="ph ph-power"></i> Activar publicacion diaria</button>
+            <button id="acctPubStop" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Parar publicacion diaria</button>
+            <button id="acctPubNow" class="control-btn-small"><i class="ph ph-paper-plane-tilt"></i> Publicar uno ahora</button>
+            <button id="acctPubPreview" class="control-btn-small"><i class="ph ph-eye"></i> Generar sin publicar</button>
+            <span id="acctPubBadge" class="status-badge">Sin configurar</span>
+          </div>
+          <div id="acctPubBox" style="display:none; margin-top:12px; padding:12px 14px; border-radius:10px; background:#101c2e; border:1px solid #1e3a63;">
+            <p id="acctPubMsg" style="font-size:13.5px; color:#9cc3ff; margin:0;"></p>
+          </div>
+          <div id="acctPubHistory" style="margin-top:14px;"></div>
+          <details style="margin-top:10px;">
+            <summary class="form-hint" style="cursor:pointer;">Ver ultimos posts generados</summary>
+            <div id="acctPubFeed" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;"></div>
+          </details>
+        </div>
+      </section>
+
+      <!-- View: Auto Download -->
+      <section id="view-autodownload" class="view-section">
+        <header class="view-header">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div class="brand-icon"
+              style="background:linear-gradient(135deg, #6366f1, #a855f7); width:40px; height:40px; font-size:24px;"><i
+                class="ph ph-download-simple"></i></div>
+            <div>
+              <h2 style="margin:0;">Auto Download</h2>
+              <span style="color:var(--text-muted); font-size:13px;">Watch a TikTok channel and auto-queue new
+                videos</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button id="adStartBtn" class="control-btn-small success"><i class="ph ph-play-circle"></i> Start</button>
+            <button id="adStopBtn" class="control-btn-small danger"><i class="ph ph-stop-circle"></i> Stop</button>
+          </div>
+        </header>
+
+        <div class="dashboard-grid">
+          <div class="stats-cards">
+            <div class="stat-card">
+              <div class="stat-value" id="adWatcherState">-</div>
+              <div class="stat-label">Watcher State</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="adTotalDownloaded">0</div>
+              <div class="stat-label">Videos Downloaded</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="adLastCheck">Never</div>
+              <div class="stat-label">Last Checked</div>
+            </div>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Download Settings</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+              <div class="form-group">
+                <label>TikTok Channel / Username</label>
+                <input type="text" id="adChannel" class="control-input" placeholder="@username or full URL">
+              </div>
+              <div class="form-group">
+                <label>Check Interval (minutes)</label>
+                <input type="number" id="adInterval" class="control-input" min="1" value="10">
+              </div>
+              <div class="form-group">
+                <label>Max Videos Per Check</label>
+                <input type="number" id="adMaxVideos" class="control-input" min="1" value="5">
+              </div>
+              <div class="form-group">
+                <label>Post To Platforms</label>
+                <div style="display:flex; gap:12px; align-items:center; padding-top:6px;">
+                  <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                    <input type="checkbox" id="adPlatTiktok" value="tiktok" checked> TikTok
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                    <input type="checkbox" id="adPlatInstagram" value="instagram"> Instagram
+                  </label>
+                  <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                    <input type="checkbox" id="adPlatYoutube" value="youtube"> YouTube
+                  </label>
+                </div>
+              </div>
+            </div>
+            <button id="adSaveSettingsBtn" class="control-btn-small primary" style="margin-top:8px;"><i
+                class="ph ph-floppy-disk"></i> Save Settings</button>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Download Live Logs</div>
+            <div class="logs-container" id="adLogsContainer" style="height:320px;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Profile downloader view -->
+      <section id="view-profile-download" class="view-section">
+        <div class="view-header">
+          <h1>Profile Downloader</h1>
+          <p>Scrape specific TikTok channels and filter by view count. Videos will be saved to <code
+              style="padding: 2px 4px; background: rgba(255,255,255,0.1); border-radius: 4px;">autodownload/profile_downloads/</code>.
+          </p>
+        </div>
+
+        <div class="card" style="margin-bottom: 24px;">
+          <h2 class="card-title"><i class="ph ph-sliders"></i> Configuration</h2>
+          <div class="settings-grid">
+            <div class="form-group">
+              <label>TikTok Channel</label>
+              <input type="text" id="pdChannel" class="control-input" placeholder="e.g. @username">
+            </div>
+            <div class="form-group">
+              <label>Max Videos to Scan</label>
+              <input type="number" id="pdMaxVideos" class="control-input" min="0" placeholder="0 = All Videos"
+                value="0">
+            </div>
+            <div class="form-group">
+              <label>Min Views Filter</label>
+              <input type="number" id="pdMinViews" class="control-input" min="0" placeholder="0 = No filter"
+                value="0">
+            </div>
+          </div>
+          <div style="margin-top:20px; display:flex; gap:12px;">
+            <button id="pdStartBtn" class="control-btn primary">
+              <i class="ph ph-play"></i> Start Scraping
+            </button>
+            <button id="pdScanBtn" class="control-btn neutral" style="border: 1px solid var(--border-color);">
+              <i class="ph ph-magnifying-glass"></i> Check Videos
+            </button>
+            <button id="pdOpenFolderBtn" class="control-btn neutral">
+              <i class="ph ph-folder-open"></i> Open Downloads
+            </button>
+          </div>
+        </div>
+
+        <div class="two-col-layout">
+          <!-- Live Logs -->
+          <div class="card" style="grid-column: 1 / -1;">
+            <div class="card-header">
+              <h2 class="card-title">Live Logs</h2>
+              <span id="pdStatusBadge" class="status-badge">Idle</span>
+            </div>
+            <div class="logs-container" id="pdLogsContainer">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-google-flow" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>Google Flow Studio</h2>
+            <span class="view-subtitle">One persistent Chromium profile per account. Sign in once, then reuse the saved session.</span>
+          </div>
+          <span id="flowSessionBadge" class="status-badge">Checking session</span>
+        </header>
+
+        <div class="dashboard-grid">
+          <div class="card full-width">
+            <div class="card-title">Current Account</div>
+            <p class="flow-account-copy"><strong id="flowAccountName">-</strong><br><span id="flowAccountId" class="mono">-</span></p>
+            <div class="flow-actions">
+              <button id="flowLoginBtn" class="control-btn-small primary"><i class="ph ph-browser"></i> Open Flow in Chromium</button>
+              <button id="flowCloseBtn" class="control-btn-small"><i class="ph ph-x"></i> Close Browser</button>
+              <button id="flowRefreshBtn" class="control-btn-small"><i class="ph ph-arrows-clockwise"></i> Refresh Status</button>
+              <span class="status-badge success"><i class="ph ph-device-mobile"></i> TikTok format locked: 9:16 vertical</span>
+            </div>
+            <p id="flowSessionMessage" class="flow-session-message">The first login is manual. Session data remains in the account's local Chromium profile.</p>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Generation Prompt</div>
+            <p class="flow-session-message">Build one final Flow prompt from a fixed template and a new Gemini phrase for every video.</p>
+            <div class="flow-prompt-sections">
+              <div class="form-group flow-prompt-section">
+                <label>1. Fixed prompt template</label>
+                <p class="flow-field-help">This part remains unchanged. Place <code>{{dynamic}}</code> exactly where the generated phrase must appear.</p>
+                <textarea id="flowFixedPromptTemplate" class="control-input flow-prompt-input" rows="6" placeholder="Describe the recurring video style, camera, lighting and sound. Use this text: {{dynamic}}"></textarea>
+              </div>
+              <div class="form-group flow-prompt-section">
+                <label>2. Dynamic content instructions</label>
+                <p class="flow-field-help">Tell Gemini the theme, audience and type of phrase you want. It creates a different original phrase for each video.</p>
+                <textarea id="flowDynamicInstructions" class="control-input flow-prompt-input" rows="5" placeholder="Example: Write short, intense dark-romance phrases for women who enjoy biker romance. Make every phrase original and suitable for TikTok."></textarea>
+              </div>
+            </div>
+            <div class="form-group flow-api-key-group">
+              <label>Gemini API key</label>
+              <div class="flow-secret-row">
+                <input id="flowGeminiApiKey" class="control-input" type="password" autocomplete="new-password" placeholder="Paste a Google AI Studio API key">
+                <span id="flowGeminiKeyStatus" class="status-badge">Not configured</span>
+                <button id="flowGeminiKeyRemoveBtn" type="button" class="control-btn-small danger">Remove key</button>
+              </div>
+              <p class="flow-field-help">The key is stored only in this account's local configuration and is never returned to the browser after saving.</p>
+            </div>
+            <div class="flow-actions">
+              <button id="flowPromptPreviewBtn" type="button" class="control-btn-small"><i class="ph ph-sparkle"></i> Generate preview</button>
+            </div>
+            <div id="flowPromptPreview" class="flow-prompt-preview hidden" aria-live="polite">
+              <strong>Generated phrase</strong>
+              <p id="flowPreviewPhrase"></p>
+              <strong>Final prompt sent to Flow</strong>
+              <pre id="flowPreviewFinalPrompt"></pre>
+            </div>
+            <div class="flow-reference-row">
+              <label class="control-btn-small" for="flowReferenceInput"><i class="ph ph-image"></i> Optional reference image</label>
+              <input id="flowReferenceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+              <span id="flowReferenceName" class="flow-reference-name">No image selected</span>
+              <button id="flowReferenceRemoveBtn" type="button" class="control-btn-small danger">Remove image</button>
+              <button id="flowConfigSaveBtn" type="button" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Save prompt settings</button>
+            </div>
+            <p id="flowConfigMessage" class="flow-session-message"></p>
+          </div>
+
+          <div class="card full-width">
+            <div class="card-title">Daily Generation and TikTok Publishing</div>
+            <div class="flow-plan-grid">
+              <label>Enabled<input id="flowEnabled" type="checkbox"></label>
+              <label>Videos per day<input id="flowVideosPerDay" class="control-input" type="number" min="1" max="3" value="3"></label>
+              <label>Generate at<input id="flowDailyTime" class="control-input" type="time" value="06:00"></label>
+              <label>Timezone<input id="flowTimezone" class="control-input" value="Europe/Madrid"></label>
+              <label>Publish times<input id="flowPublicationTimes" class="control-input" value="09:30, 14:30, 22:10"></label>
+              <label>Auto-publish<input id="flowAutoPublish" type="checkbox" checked></label>
+            </div>
+            <div class="form-group" style="margin-top:14px"><label>TikTok caption</label><input id="flowCaption" class="control-input" placeholder="Optional caption for generated videos"></div>
+            <div class="flow-actions" style="margin-top:14px">
+              <button id="flowRunNowBtn" class="control-btn-small primary"><i class="ph ph-play"></i> Generate now</button>
+            </div>
+            <p class="flow-session-message">Daily jobs, permanent downloads and publication dates are persisted. Login, quota or moderation challenges stop visibly instead of being bypassed.</p>
+          </div>
+          <div class="card full-width">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Saved Flow Videos</div>
+                <p class="flow-field-help">Every generated video remains on this PC, including after it is copied to the TikTok queue.</p>
+              </div>
+              <button id="flowOpenDownloadsBtn" type="button" class="control-btn-small"><i class="ph ph-folder-open"></i> Open folder</button>
+            </div>
+            <div id="flowDownloadsPath" class="setup-path">Loading permanent download folder...</div>
+            <div id="flowDownloadsList" class="flow-downloads-list"><div class="setup-empty">No saved Flow videos yet.</div></div>
+          </div>
+          <div class="card full-width">
+            <div class="card-header"><div class="card-title">Flow Pipeline</div><span id="flowPipelineBadge" class="status-badge">Idle</span></div>
+            <div id="flowJobsList" class="autonomous-jobs"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-x-autopilot" class="view-section">
+        <header class="view-header">
+          <div>
+            <h2>X Autopilot</h2>
+            <span class="view-subtitle">Generacion diaria, curacion de referencias y cola programada por cuenta.</span>
+          </div>
+          <span id="xWorkerBadge" class="status-badge">Worker detenido</span>
+        </header>
+        
+        <!-- MARKER: XAP-UI-v1 -->
+        <div id="xLoginBanner" class="tt-login-banner card" style="margin-bottom:14px;">
+          <div class="tt-login-row">
+            <span class="tt-login-icon"><i class="ph ph-x-logo"></i></span>
+            <div class="tt-login-text">
+              <strong id="xLoginTitle">Sesion de X (Twitter)</strong>
+              <span id="xLoginMessage">Inicia sesion en la ventana de X o pega tus cookies para publicar automaticamente.</span>
+            </div>
+            <span id="xLoginStateBadge" class="status-badge">Sin comprobar</span>
+            <button id="xLoginBtn" class="control-btn-small primary"><i class="ph ph-browser"></i> Iniciar sesion</button>
+            <button id="xLoginSaveBtn" class="control-btn-small success"><i class="ph ph-floppy-disk"></i> Guardar sesion</button>
+            <button id="xLoginCloseBtn" class="control-btn-small danger"><i class="ph ph-x"></i> Cerrar</button>
+            <button id="xRetryBtn" class="control-btn-small" title="Reprogramar los posts que fallaron"><i class="ph ph-arrows-clockwise"></i> Reintentar fallidos</button>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:flex-start;">
+            <textarea id="xCookiesInput" rows="2" placeholder="O pega aqui tus cookies de X (formato header: auth_token=...; ct0=...  o JSON exportado)" style="flex:1; min-width:260px; font-family:monospace; font-size:11px; padding:8px; border-radius:8px; border:1px solid var(--border-color, #2a2a2a); background:var(--bg-input, #111); color:inherit; resize:vertical;"></textarea>
+            <button id="xCookiesBtn" class="control-btn-small"><i class="ph ph-key"></i> Importar cookies</button>
+          </div>
+        </div>
+
+<div class="x-grid">
+          <div class="card">
+            <div class="card-title">Perfil y automatizacion</div>
+            <div class="settings-grid">
+              <div class="form-group"><label>Usuario X</label><input id="xUsername" class="control-input" placeholder="mi_cuenta"></div>
+              <div class="form-group"><label>Posts diarios</label><input id="xPostsPerDay" class="control-input" type="number" min="1" max="20" value="3"></div>
+              <div class="form-group"><label>Horarios</label><input id="xDailyTimes" class="control-input" placeholder="09:00, 14:00, 19:00"></div>
+              <div class="form-group"><label>Modo de publicacion</label><select id="xPostingMode" class="control-input"><option value="simulation">Simulacion local</option><option value="live">API oficial de X</option></select></div>
+              <div class="form-group"><label>Tipo de cuenta</label><select id="xAccountTier" class="control-input"><option value="free">Free: 280 caracteres</option><option value="premium">Premium: 4000 caracteres</option></select></div>
+              <div class="form-group"><label>Fuente de contenido</label><select id="xContentMode" class="control-input"><option value="ai">Generar con IA</option><option value="recent-search">Buscar posts recientes y reinterpretar</option></select></div>
+              <div class="form-group"><label>Tema de busqueda en X</label><input id="xSearchTopic" class="control-input" placeholder="automatizacion con IA"></div>
+            </div>
+            <!-- MARKER: XAP-LANG-UI-v1 -->
+            <div class="form-group" style="margin-top:16px"><label>Idioma de los posts</label><select id="xLanguage" class="control-input" style="max-width:220px;"><option value="en">Ingles</option><option value="es">Espanol</option></select></div>
+            <div class="form-group" style="margin-top:16px"><label>Prompt maestro</label><textarea id="xMasterPrompt" class="control-input" rows="5"></textarea></div>
+            <!-- MARKER: XAP-AI-CLEAN-v1 -->
+            <div class="card" style="margin-top:16px; background:#101317; border:1px solid #242a33;">
+              <div class="card-title" style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                <i class="ph ph-brain"></i> Modelo de IA
+                <span class="tag-ok">automatico</span>
+              </div>
+              <p class="form-hint" style="margin-bottom:10px;">La IA se elige sola, gratis primero. Se configura una vez en <b>Configuracion IA</b>.</p>
+              <div id="xAiChainPreview" class="ai-chain-list"></div>
+              <button id="xAiConfigLink" class="control-btn-small" style="margin-top:10px;"><i class="ph ph-gear"></i> Abrir Configuracion IA</button>
+            </div>
+
+            <details id="xAdvancedTokens" style="margin-top:14px;">
+              <summary style="cursor:pointer; color:var(--text-muted, #8b95a5); font-size:12.5px;">Opciones avanzadas: publicar con la API oficial de X (no necesario)</summary>
+              <p class="form-hint" style="margin-top:8px;">Solo si vas a usar la API oficial en vez de tu sesion de X. En el uso normal, dejalo vacio.</p>
+              <div class="settings-grid">
+                <div class="form-group"><label>Token de acceso X</label><input id="xAccessToken" class="control-input" type="password" placeholder="Solo para la API oficial"></div>
+                <div class="form-group"><label>Bearer token X</label><input id="xBearerToken" class="control-input" type="password" placeholder="Para busqueda reciente"></div>
+              </div>
+            </details>
+            <label class="toggle-line" style="margin-top:18px"><input id="xEnabled" type="checkbox"><span>Activar generacion diaria autonoma</span></label>
+            <div style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap"><button id="xSaveBtn" class="control-btn-small primary"><i class="ph ph-floppy-disk"></i> Guardar</button><button id="xGenerateBtn" class="control-btn-small"><i class="ph ph-sparkle"></i> Generar ahora</button><button id="xClearQueueBtn" class="control-btn-small danger"><i class="ph ph-trash"></i> Borrar pendientes</button></div>
+            <p id="xLiveStatus" class="form-hint">Las claves no se muestran despues de guardarlas. El modo simulacion no publica en X.</p>
+          </div>
+          <div class="card">
+            <div class="card-title">Curacion de cuenta objetivo</div>
+            <p class="form-hint">Anade tweets de referencia para analizar temas y tono. El modelo recibe contexto, pero genera texto nuevo.</p>
+            <div class="form-group"><label>Usuario</label><input id="xReferenceUser" class="control-input" placeholder="cuenta_referencia"></div>
+            <div class="form-group" style="margin-top:10px"><label>Texto del tweet</label><textarea id="xReferenceText" class="control-input" rows="4"></textarea></div>
+            <div class="form-group" style="margin-top:10px"><label>URL opcional</label><input id="xReferenceUrl" class="control-input" placeholder="https://x.com/.../"></div>
+            <button id="xReferenceBtn" class="control-btn-small primary" style="margin-top:12px"><i class="ph ph-plus"></i> Anadir referencia</button>
+            <div id="xReferencesList" class="x-reference-list"></div>
+          </div>
+          <div class="card full-width">
+            <div class="card-header"><div class="card-title">Cola X</div><span id="xQueueCount" class="status-badge">0</span></div>
+            <div id="xQueueList" class="x-queue-list"></div>
+            <div id="xLogs" class="logs-container" style="margin-top:16px;height:140px"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+  <script src="studio-assets/studio.js"></script>
+  <script src="autoclone.js"></script>
+  <script src="autopost.js"></script>
+    <script src="acct-session.js" defer></script>
+    <script src="acct-radar-ui.js" defer></script>
+<!-- MARKER: LANG-EN-FIRST-v1 -->
+</body>
+
+</html>

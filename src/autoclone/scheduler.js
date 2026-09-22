@@ -21,6 +21,27 @@ async function exists(filePath) {
   try { await fs.access(filePath); return true; } catch { return false; }
 }
 
+// __ORDER_BY_UPLOAD_DATE__
+// Ordena por fecha real de publicacion (uploadedAt) cuando existe; si falta,
+// usa el downloadIndex de siempre y, en ultimo lugar, el nombre del archivo.
+function orderVideos(items) {
+  return items.sort((a, b) => {
+    const aDate = a.uploadedAt ? Date.parse(a.uploadedAt) : NaN;
+    const bDate = b.uploadedAt ? Date.parse(b.uploadedAt) : NaN;
+    const aHasDate = Number.isFinite(aDate);
+    const bHasDate = Number.isFinite(bDate);
+    if (aHasDate && bHasDate && aDate !== bDate) return aDate - bDate;
+    const aHasOrder = Number.isInteger(a.downloadIndex);
+    const bHasOrder = Number.isInteger(b.downloadIndex);
+    if (aHasOrder && bHasOrder && a.downloadIndex !== b.downloadIndex) {
+      return a.downloadIndex - b.downloadIndex;
+    }
+    if (aHasDate && bHasDate) return 0;
+    if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
+    return a.position - b.position;
+  }).map((item) => item.filePath);
+}
+
 /** List video files directly inside a folder (non-recursive), sorted by name. */
 async function listVideos(folder) {
   const dir = path.resolve(String(folder || ""));
@@ -30,20 +51,16 @@ async function listVideos(folder) {
     .filter((entry) => VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
     .map((entry) => path.join(dir, entry.name))
     .sort((a, b) => a.localeCompare(b));
-  const ordered = await Promise.all(files.map(async (filePath, position) => ({
-    filePath,
-    position,
-    downloadIndex: (await readVideoMeta(filePath))?.downloadIndex,
-  })));
-  return ordered
-    .sort((a, b) => {
-      const aHasOrder = Number.isInteger(a.downloadIndex);
-      const bHasOrder = Number.isInteger(b.downloadIndex);
-      if (aHasOrder && bHasOrder) return a.downloadIndex - b.downloadIndex;
-      if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
-      return a.position - b.position;
-    })
-    .map((item) => item.filePath);
+  const ordered = await Promise.all(files.map(async (filePath, position) => {
+    const meta = await readVideoMeta(filePath);
+    return {
+      filePath,
+      position,
+      downloadIndex: meta?.downloadIndex,
+      uploadedAt: meta?.uploadedAt,
+    };
+  }));
+  return orderVideos(ordered);
 }
 
 /**
@@ -294,4 +311,4 @@ async function uniqueName(dir, desired) {
   return candidate;
 }
 
-module.exports = { listVideos, nextSlots, buildPlan, scheduleFolder, normalizeHashtags, appendHashtags, resolvePostedDir, moveToSent, WEEKDAYS, uniqueName };
+module.exports = { listVideos, orderVideos, nextSlots, buildPlan, scheduleFolder, normalizeHashtags, appendHashtags, resolvePostedDir, moveToSent, WEEKDAYS, uniqueName };

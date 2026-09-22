@@ -1,0 +1,109 @@
+diff --git a/src/tiktok-uploader.js b/src/tiktok-uploader.js
+index 860b723..c916521 100644
+--- a/src/tiktok-uploader.js
++++ b/src/tiktok-uploader.js
+@@ -1535,7 +1535,7 @@ async function clickScheduleButton(page) {
+     // and coordinates must be read after scrolling or the click lands elsewhere.
+     const scored = await page.evaluate(() => {
+       const buttons = [...document.querySelectorAll("button, [role='button']")].filter(
+-        (element) => element.offsetParent !== null && element.getAttribute("aria-disabled") !== "true"
++        (element) => element.offsetParent !== null && !element.disabled && element.getAttribute("aria-disabled") !== "true"
+       );
+ 
+       const byE2e = buttons.find((button) => (button.getAttribute("data-e2e") || "").includes("post_video_button"));
+@@ -1558,7 +1558,7 @@ async function clickScheduleButton(page) {
+     await page.waitForTimeout(300);
+     const point = await page.evaluate(() => {
+       const buttons = [...document.querySelectorAll("button, [role='button']")].filter(
+-        (element) => element.offsetParent !== null && element.getAttribute("aria-disabled") !== "true"
++        (element) => element.offsetParent !== null && !element.disabled && element.getAttribute("aria-disabled") !== "true"
+       );
+       const byE2e = buttons.find((button) => (button.getAttribute("data-e2e") || "").includes("post_video_button"));
+       const target = byE2e || buttons.find((button) => {
+@@ -1584,6 +1584,18 @@ async function clickScheduleButton(page) {
+   throw new Error("Could not find an enabled Schedule button after 6 attempts.");
+ }
+ 
++async function retryFinalActionButton(page, scheduleMode) {
++  if (!scheduleMode) return tryClickPublishButton(page);
++
++  try {
++    await clickScheduleButton(page);
++    return true;
++  } catch (error) {
++    console.log(`Could not retry TikTok Schedule button: ${error.message}`);
++    return false;
++  }
++}
++
+ function formatScheduleDate(date, timezone) {
+   const dt = timezone ? DateTime.fromJSDate(date).setZone(timezone) : DateTime.fromJSDate(date);
+   return dt.toFormat("yyyy-LL-dd");
+@@ -2633,11 +2645,12 @@ async function trySecondaryPublishConfirm(page) {
+   return false;
+ }
+ 
+-async function waitForPublishConfirmation(page, responseTracker) {
++async function waitForPublishConfirmation(page, responseTracker, scheduleMode = false) {
+   const startedUrl = page.url();
+   const tracker = responseTracker || createPublishResponseTracker(page);
+   const ownsTracker = !responseTracker;
+   let primaryRetryCount = 0;
++  const finalActionLabel = scheduleMode ? "Schedule" : "Publish";
+ 
+   try {
+     for (let attempt = 0; attempt < 30; attempt += 1) {
+@@ -2651,13 +2664,13 @@ async function waitForPublishConfirmation(page, responseTracker) {
+       if (await dismissRestrictedContentModal(page)) {
+         await page.waitForTimeout(700);
+         const publishReady = await waitForPublishClickable(page, 8000);
+-        const reclicked = await tryClickPublishButton(page);
++        const reclicked = await retryFinalActionButton(page, scheduleMode);
+         console.log(
+           reclicked
+-            ? "Popup restringido cerrado y Publicar pulsado de nuevo."
++            ? `Popup restringido cerrado y ${finalActionLabel} pulsado de nuevo.`
+             : publishReady
+-              ? "Popup restringido cerrado; el boton esta listo pero no consegui pulsarlo."
+-              : "Popup restringido cerrado, pero el boton Publicar no volvio a estar disponible."
++              ? `Popup restringido cerrado; el boton ${finalActionLabel} esta listo pero no consegui pulsarlo.`
++              : `Popup restringido cerrado, pero el boton ${finalActionLabel} no volvio a estar disponible.`
+         );
+         if (reclicked) {
+           primaryRetryCount = 0;
+@@ -2672,11 +2685,11 @@ async function waitForPublishConfirmation(page, responseTracker) {
+       // (no solo mientras queden reintentos).
+       if (await dismissRestrictedContentModal(page)) {
+         await page.waitForTimeout(700);
+-        const reclicked = await tryClickPublishButton(page);
++        const reclicked = await retryFinalActionButton(page, scheduleMode);
+         console.log(
+           reclicked
+-            ? "Popup restringido cerrado y Publicar pulsado de nuevo."
+-            : "Popup restringido cerrado, pero no encontre el boton Publicar."
++            ? `Popup restringido cerrado y ${finalActionLabel} pulsado de nuevo.`
++            : `Popup restringido cerrado, pero no encontre el boton ${finalActionLabel}.`
+         );
+         if (reclicked) {
+           primaryRetryCount = 0;
+@@ -2727,9 +2740,9 @@ async function waitForPublishConfirmation(page, responseTracker) {
+         attempt % 5 === 0 &&
+         page.url().includes("/upload")
+       ) {
+-        console.log("No publish confirmation yet; retrying the primary TikTok Post button.");
++        console.log(`No ${finalActionLabel.toLowerCase()} confirmation yet; retrying the TikTok ${finalActionLabel} button.`);
+         // // MARKER: TIKTOK-RESTRICTED-MODAL-v1: cerrar el modal de contenido restringido antes de reintentar.
+-        const retried = await tryClickPublishButton(page);
++        const retried = await retryFinalActionButton(page, scheduleMode);
+         if (retried) {
+           primaryRetryCount += 1;
+           await page.waitForTimeout(1000);
+@@ -3097,7 +3110,7 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
+     await onPhase?.(scheduleMode ? "schedule-clicking" : "publish-clicking");
+     await (scheduleMode ? clickScheduleButton(page) : clickPublish(page));
+     await onPhase?.(scheduleMode ? "schedule-submitted" : "publish-submitted");
+-    const confirmation = await waitForPublishConfirmation(page, publishResponseTracker);
++    const confirmation = await waitForPublishConfirmation(page, publishResponseTracker, scheduleMode);
+     if (!confirmation.ok) {
+       throw new Error(`${scheduleMode ? "Schedule" : "Publish"} verification failed: ${confirmation.reason}`);
+     }

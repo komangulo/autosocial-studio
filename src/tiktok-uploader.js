@@ -28,6 +28,14 @@ let tempMailSetupState = {
   startedAt: null,
   completedAt: null,
 };
+let assistedAccountSetupState = {
+  accountId: null,
+  open: false,
+  stage: "idle",
+  message: "No assisted TikTok account setup is running.",
+  startedAt: null,
+  completedAt: null,
+};
 
 /**
  * // MARKER: TIKTOK-PROFILE-RELEASE-v1
@@ -1535,7 +1543,7 @@ async function clickScheduleButton(page) {
     // and coordinates must be read after scrolling or the click lands elsewhere.
     const scored = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll("button, [role='button']")].filter(
-        (element) => element.offsetParent !== null && element.getAttribute("aria-disabled") !== "true"
+        (element) => element.offsetParent !== null && !element.disabled && element.getAttribute("aria-disabled") !== "true"
       );
 
       const byE2e = buttons.find((button) => (button.getAttribute("data-e2e") || "").includes("post_video_button"));
@@ -1558,7 +1566,7 @@ async function clickScheduleButton(page) {
     await page.waitForTimeout(300);
     const point = await page.evaluate(() => {
       const buttons = [...document.querySelectorAll("button, [role='button']")].filter(
-        (element) => element.offsetParent !== null && element.getAttribute("aria-disabled") !== "true"
+        (element) => element.offsetParent !== null && !element.disabled && element.getAttribute("aria-disabled") !== "true"
       );
       const byE2e = buttons.find((button) => (button.getAttribute("data-e2e") || "").includes("post_video_button"));
       const target = byE2e || buttons.find((button) => {
@@ -1584,6 +1592,17 @@ async function clickScheduleButton(page) {
   throw new Error("Could not find an enabled Schedule button after 6 attempts.");
 }
 
+async function retryFinalActionButton(page, scheduleMode) {
+  if (!scheduleMode) return tryClickPublishButton(page);
+
+  try {
+    await clickScheduleButton(page);
+    return true;
+  } catch (error) {
+    console.log(`Could not retry TikTok Schedule button: ${error.message}`);
+    return false;
+  }
+}
 function formatScheduleDate(date, timezone) {
   const dt = timezone ? DateTime.fromJSDate(date).setZone(timezone) : DateTime.fromJSDate(date);
   return dt.toFormat("yyyy-LL-dd");
@@ -2633,11 +2652,12 @@ async function trySecondaryPublishConfirm(page) {
   return false;
 }
 
-async function waitForPublishConfirmation(page, responseTracker) {
+async function waitForPublishConfirmation(page, responseTracker, scheduleMode = false) {
   const startedUrl = page.url();
   const tracker = responseTracker || createPublishResponseTracker(page);
   const ownsTracker = !responseTracker;
   let primaryRetryCount = 0;
+  const finalActionLabel = scheduleMode ? "Schedule" : "Publish";
 
   try {
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -2651,13 +2671,13 @@ async function waitForPublishConfirmation(page, responseTracker) {
       if (await dismissRestrictedContentModal(page)) {
         await page.waitForTimeout(700);
         const publishReady = await waitForPublishClickable(page, 8000);
-        const reclicked = await tryClickPublishButton(page);
+        const reclicked = await retryFinalActionButton(page, scheduleMode);
         console.log(
           reclicked
-            ? "Popup restringido cerrado y Publicar pulsado de nuevo."
+            ? `Popup restringido cerrado y ${finalActionLabel} pulsado de nuevo.`
             : publishReady
-              ? "Popup restringido cerrado; el boton esta listo pero no consegui pulsarlo."
-              : "Popup restringido cerrado, pero el boton Publicar no volvio a estar disponible."
+              ? `Popup restringido cerrado; el boton ${finalActionLabel} esta listo pero no consegui pulsarlo.`
+              : `Popup restringido cerrado, pero el boton ${finalActionLabel} no volvio a estar disponible.`
         );
         if (reclicked) {
           primaryRetryCount = 0;
@@ -2665,26 +2685,6 @@ async function waitForPublishConfirmation(page, responseTracker) {
           continue;
         }
       }
-
-      // MARKER: TIKTOK-RESTRICTED-MODAL-v2
-      // El popup "Content may be restricted" aparece al pulsar Publicar y
-      // tapa el boton. Hay que cerrarlo Y volver a pulsar Publicar, siempre
-      // (no solo mientras queden reintentos).
-      if (await dismissRestrictedContentModal(page)) {
-        await page.waitForTimeout(700);
-        const reclicked = await tryClickPublishButton(page);
-        console.log(
-          reclicked
-            ? "Popup restringido cerrado y Publicar pulsado de nuevo."
-            : "Popup restringido cerrado, pero no encontre el boton Publicar."
-        );
-        if (reclicked) {
-          primaryRetryCount = 0;
-          await page.waitForTimeout(1500);
-          continue;
-        }
-      }
-
       const bodyText = await page
         .locator("body")
         .innerText()
@@ -2727,9 +2727,9 @@ async function waitForPublishConfirmation(page, responseTracker) {
         attempt % 5 === 0 &&
         page.url().includes("/upload")
       ) {
-        console.log("No publish confirmation yet; retrying the primary TikTok Post button.");
+        console.log(`No ${finalActionLabel.toLowerCase()} confirmation yet; retrying the TikTok ${finalActionLabel} button.`);
         // // MARKER: TIKTOK-RESTRICTED-MODAL-v1: cerrar el modal de contenido restringido antes de reintentar.
-        const retried = await tryClickPublishButton(page);
+        const retried = await retryFinalActionButton(page, scheduleMode);
         if (retried) {
           primaryRetryCount += 1;
           await page.waitForTimeout(1000);
@@ -2883,6 +2883,133 @@ function startDashboardLoginSessionDetached() {
   return { ok: true, opening: true, message: "Abriendo Chromium..." };
 }
 
+async function selectTikTokSignupDate(page) {
+  const fields = [
+    { label: "Month", value: "April" },
+    { label: "Day", value: "18" },
+    { label: "Year", value: "1988" },
+  ];
+
+  for (const field of fields) {
+    const combobox = page.getByRole("combobox", { name: new RegExp("^" + field.label + "\\.") }).first();
+    await combobox.waitFor({ state: "visible", timeout: 15000 });
+    await combobox.click();
+    const option = page.getByRole("option", { name: field.value, exact: true }).last();
+    await option.waitFor({ state: "visible", timeout: 10000 });
+    await option.click();
+  }
+}
+
+async function prepareTikTokSignup(page) {
+  const channel = page.locator('[data-e2e="channel-item"]').filter({ hasText: /Use phone or email/i }).first();
+  await channel.waitFor({ state: "visible", timeout: 20000 });
+  await channel.scrollIntoViewIfNeeded();
+  await channel.click({ force: true });
+
+  const emailLink = page.locator('a[href="/signup/phone-or-email/email"]').first();
+  await emailLink.waitFor({ state: "visible", timeout: 20000 });
+  await emailLink.scrollIntoViewIfNeeded();
+  await Promise.all([
+    page.waitForURL(/\/signup\/phone-or-email\/email/i, { timeout: 20000 }).catch(() => {}),
+    emailLink.click({ force: true }),
+  ]);
+  await selectTikTokSignupDate(page);
+}
+
+async function openGoogleTab(context, currentPage) {
+  const existing = context.pages().find((tab) => /google\./i.test(tab.url()));
+  if (existing) {
+    await existing.bringToFront().catch(() => {});
+    return existing;
+  }
+  const tab = await context.newPage();
+  await tab.goto("https://www.eztempmail.com/", { waitUntil: "domcontentloaded" }).catch(() => {});
+  await currentPage?.bringToFront().catch(() => {});
+  return tab;
+}
+
+async function openGoogleTab(context, currentPage) {
+  const existing = context.pages().find((tab) => /google\./i.test(tab.url()));
+  if (existing) {
+    await existing.bringToFront().catch(() => {});
+    return existing;
+  }
+  const tab = await context.newPage();
+  await tab.goto("https://www.eztempmail.com/", { waitUntil: "domcontentloaded" }).catch(() => {});
+  await acceptGoogleConsent(tab);
+  await currentPage?.bringToFront().catch(() => {});
+  return tab;
+}
+
+async function clickIfVisible(page, selector, timeout) {
+  const button = page.locator(selector).first();
+  try {
+    await button.waitFor({ state: "visible", timeout });
+    await button.click({ force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function acceptGoogleConsent(page) {
+  await page.waitForTimeout(10000);
+  await clickIfVisible(page, "#cmpwelcomebtnyes a, #cmpwelcomebtnyes", 12000);
+  await page.waitForTimeout(1500);
+  await clickIfVisible(page, "button.fc-cta-consent, button[aria-label='Consent']", 12000);
+}
+
+async function startAssistedTikTokAccountSetup(accountId) {
+  const account = await requireAccount(accountId);
+  const { context, alreadyOpen } = await openLoginContextForAccount(account.id);
+  const page = context.pages()[0] || (await context.newPage());
+
+  if (!alreadyOpen || !/tiktok\.com/i.test(page.url())) {
+    await page.goto("https://www.tiktok.com/signup", { waitUntil: "domcontentloaded" });
+  }
+  await openGoogleTab(context, page);
+
+  let setupMessage = "Completa manualmente el correo, la contrasena, el CAPTCHA y el codigo de verificacion.";
+  let setupStage = "manual-signup";
+  try {
+    await prepareTikTokSignup(page);
+    setupMessage = "Metodo de registro y fecha 18/04/1988 preparados. Completa manualmente el correo, la contrasena, el CAPTCHA y el codigo de verificacion.";
+  } catch (error) {
+    setupStage = "needs-attention";
+    setupMessage = "TikTok no mostro el formulario esperado. Completa los pasos iniciales manualmente. Detalle: " + error.message;
+  }
+
+  assistedAccountSetupState = {
+    accountId: account.id,
+    open: true,
+    stage: setupStage,
+    message: setupMessage,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+  };
+  return { ok: true, account, status: getAssistedAccountSetupStatus() };
+}
+
+async function confirmAssistedTikTokAccountSetup() {
+  const accountId = assistedAccountSetupState.accountId;
+  if (!accountId) throw new Error("No hay un registro asistido en curso.");
+  const saved = await hasSavedPlatformSession("tiktok", accountId);
+  if (!saved) {
+    throw new Error("No detecto una sesion guardada todavia. Termina el registro e inicia sesion en TikTok.");
+  }
+  assistedAccountSetupState = {
+    ...assistedAccountSetupState,
+    stage: "ready",
+    message: "Cuenta confirmada. La sesion se conserva en el perfil persistente de esta cuenta.",
+    completedAt: new Date().toISOString(),
+  };
+  return getAssistedAccountSetupStatus();
+}
+
+function getAssistedAccountSetupStatus() {
+  return { ...assistedAccountSetupState };
+}
+
 async function captureTempMailForAccount(accountId) {
   if (!tempMailSetupPage || tempMailSetupPage.isClosed()) {
     tempMailSetupPage = loginSessionContext?.pages()
@@ -3001,6 +3128,14 @@ async function closeLoginSession() {
       ? "Temporary email saved. The Chromium window is closed."
       : "The Chromium setup window was closed.",
   };
+  assistedAccountSetupState = {
+    ...assistedAccountSetupState,
+    open: false,
+    stage: assistedAccountSetupState.stage === "ready" ? "ready" : "closed",
+    message: assistedAccountSetupState.stage === "ready"
+      ? "Cuenta confirmada. El perfil persistente esta cerrado."
+      : "La ventana de registro fue cerrada.",
+  };
   return { ok: true, alreadyClosed: false };
 }
 
@@ -3022,18 +3157,125 @@ async function startLoginSessionCli() {
   });
 }
 
+/**
+ * // MARKER: TIKTOK-SHARED-BROWSER-LEASE-v1
+ * Coordinador de navegador compartido para el LOTE de TikTok.
+ *
+ * Con reuseBrowser, post-service pide aqui un contexto ya abierto y lo
+ * devuelve al terminar. El primer video del lote abre Chrome; los demas lo
+ * reutilizan; el ultimo lo cierra. Asi NO se abre/cierra un navegador por
+ * video (que bloqueaba el perfil y hacia fallar los siguientes).
+ */
+const sharedTikTokBrowser = {
+  accountId: null,
+  context: null,
+  page: null,
+  lastUseAt: 0,
+  idleTimer: null,
+  // El worker publica los videos UNO DETRAS DE OTRO (secuencial). Si cerrasemos
+  // el navegador al acabar cada video, volveriamos al bug original (perfil
+  // bloqueado y siguientes videos fallando). Por eso el navegador del lote se
+  // mantiene vivo y solo se cierra cuando pasan N ms sin usarse (lote acabado)
+  // o cuando alguien lo pide explicitamente.
+  IDLE_MS: 20000,
+};
+
+function closeSharedTikTokBrowserNow() {
+  const state = sharedTikTokBrowser;
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+    state.idleTimer = null;
+  }
+  const context = state.context;
+  state.context = null;
+  state.page = null;
+  state.accountId = null;
+  if (context) {
+    return context.close().catch(() => {});
+  }
+  return Promise.resolve();
+}
+
+function scheduleIdleClose() {
+  const state = sharedTikTokBrowser;
+  if (state.idleTimer) clearTimeout(state.idleTimer);
+  state.idleTimer = setTimeout(() => {
+    // Si nadie lo ha vuelto a usar, el lote ha terminado: cerrar.
+    if (Date.now() - sharedTikTokBrowser.lastUseAt >= sharedTikTokBrowser.IDLE_MS - 50) {
+      closeSharedTikTokBrowserNow().catch(() => {});
+    }
+  }, sharedTikTokBrowser.IDLE_MS);
+  if (state.idleTimer.unref) state.idleTimer.unref();
+}
+
+async function acquireSharedTikTokBrowser(accountId) {
+  const state = sharedTikTokBrowser;
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+    state.idleTimer = null;
+  }
+
+  // Otra cuenta: cerramos el anterior y abrimos el de esta.
+  if (state.accountId && state.accountId !== accountId) {
+    await closeSharedTikTokBrowserNow();
+  }
+
+  // Contexto muerto: reabrir.
+  if (state.context && state.accountId === accountId) {
+    const alive = (() => {
+      try {
+        return !state.context.pages().every((p) => p.isClosed());
+      } catch {
+        return false;
+      }
+    })();
+    if (!alive) await closeSharedTikTokBrowserNow();
+  }
+
+  if (!state.context) {
+    state.context = await openContextWithRetry(accountId);
+    state.page = state.context.pages()[0] || (await state.context.newPage());
+    state.accountId = accountId;
+    console.log("Lote TikTok: navegador abierto (se reutilizara para los demas videos).");
+  }
+  state.lastUseAt = Date.now();
+  return { context: state.context, page: state.page };
+}
+
+function releaseSharedTikTokBrowser() {
+  // No cerramos aqui: el lote sigue. Solo marcamos el uso y programamos el
+  // cierre por inactividad, para que el ultimo video del lote sea quien deje
+  // el navegador cerrado.
+  const state = sharedTikTokBrowser;
+  state.lastUseAt = Date.now();
+  scheduleIdleClose();
+  return Promise.resolve();
+}
+
+async function closeSharedTikTokBrowser() {
+  return closeSharedTikTokBrowserNow();
+}
+
+
 async function uploadVideo({ videoPath, coverPath, caption, source, accountId, onPhase, scheduledAt, scheduleTimezone, location, aiGenerated, page: sharedPage, context: sharedContext, reuseBrowser}) {
   const absoluteVideoPath = path.resolve(videoPath);
   // MARKER: TIKTOK-REUSE-BROWSER-v1
   // Con reuseBrowser la pagina y el contexto vienen del lote (un solo
   // navegador para todos los videos) y NO se cierran aqui.
   const ownsBrowser = !(reuseBrowser && sharedPage && sharedContext);
-  const context = ownsBrowser
-    ? await openContextWithRetry(accountId)
-    : sharedContext;
-  const page = ownsBrowser
-    ? context.pages()[0] || (await context.newPage())
-    : sharedPage;
+  // Si reuseBrowser, tomamos el navegador del lote (se cierra solo al
+  // terminar el ultimo video). Si no, abrimos uno propio para este video.
+  let lease = null;
+  let context;
+  let page;
+  if (ownsBrowser) {
+    context = await openContextWithRetry(accountId);
+    page = context.pages()[0] || (await context.newPage());
+  } else {
+    lease = await acquireSharedTikTokBrowser(accountId);
+    context = lease.context;
+    page = lease.page;
+  }
   let closeHoldMs = 0;
   let publishResponseTracker = null;
   const scheduleMode = Boolean(scheduledAt);
@@ -3097,7 +3339,7 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
     await onPhase?.(scheduleMode ? "schedule-clicking" : "publish-clicking");
     await (scheduleMode ? clickScheduleButton(page) : clickPublish(page));
     await onPhase?.(scheduleMode ? "schedule-submitted" : "publish-submitted");
-    const confirmation = await waitForPublishConfirmation(page, publishResponseTracker);
+    const confirmation = await waitForPublishConfirmation(page, publishResponseTracker, scheduleMode);
     if (!confirmation.ok) {
       throw new Error(`${scheduleMode ? "Schedule" : "Publish"} verification failed: ${confirmation.reason}`);
     }
@@ -3133,13 +3375,20 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
     // Si fallo la PROGRAMACION, no cerrar: deja la ventana abierta para ver
     // el motivo y guarda la captura. En publicacion normal si se cierra.
     const failedSchedule = Boolean(lastScheduleError);
-    if (ownsBrowser && !(scheduleMode && failedSchedule && config.keepBrowserOnScheduleFail !== false)) {
-      await holdBrowserBeforeClose(page, closeHoldMs, "post-finalization");
-      await context.close();
-    } else if (scheduleMode && failedSchedule) {
-      console.log("Programacion fallida: se deja el navegador ABIERTO para revisarlo.");
-    } else if (!ownsBrowser) {
-      // Navegador compartido: nunca lo cierra el uploader.
+    if (ownsBrowser) {
+      // Navegador propio de este video.
+      if (!(scheduleMode && failedSchedule && config.keepBrowserOnScheduleFail === true)) {
+        await holdBrowserBeforeClose(page, closeHoldMs, "post-finalization");
+        await context.close().catch(() => {});
+      } else {
+        console.log("Programacion fallida: se deja el navegador ABIERTO para revisarlo.");
+      }
+    }
+    // Navegador compartido: se devuelve al lote. Se cierra solo cuando ya no
+    // queda ningun video usandolo, aunque haya fallado la programacion, para
+    // no dejar una ventana huerfana bloqueando el perfil del siguiente video.
+    if (lease) {
+      await releaseSharedTikTokBrowser().catch(() => {});
     }
   }
 }
@@ -3147,12 +3396,16 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
 module.exports = {
   startLoginSession: startLoginSessionCli,
   startDashboardLoginSession: startDashboardLoginSessionDetached,
+  startAssistedTikTokAccountSetup,
+  confirmAssistedTikTokAccountSetup,
+  getAssistedAccountSetupStatus,
   startTempMailSetupSession,
   retryTempMailCapture,
   getTempMailSetupStatus,
   getLoginSessionStatus,
   closeLoginSession,
   uploadVideo,
+  closeSharedTikTokBrowser,
   openContextWithRetry,
   _private: {
     ensureScheduleRadioOn,

@@ -31,7 +31,22 @@ async function postSingleVideo({ videoPath, caption, source, postedDir, failedDi
   await ensureDirectories([posted, failed]);
 
   const coverPath = await findThumbnailPath(videoPath);
-  const result = await uploadVideo({ videoPath, coverPath, caption, source, accountId, onPhase, scheduledAt, scheduleTimezone, location, aiGenerated });
+  const result = await uploadVideo({
+    videoPath,
+    coverPath,
+    caption,
+    source,
+    accountId,
+    onPhase,
+    scheduledAt,
+    scheduleTimezone,
+    location,
+    aiGenerated,
+    // MARKER: TIKTOK-SHARED-BROWSER-LEASE-v1
+    // reuseBrowser: el lote reutiliza un solo Chrome para todos los videos,
+    // en vez de abrir y cerrar uno por video (que bloqueaba el perfil).
+    reuseBrowser: true,
+  });
   const sidecarPaths = getSidecarPaths(videoPath);
 
   if (result.ok) {

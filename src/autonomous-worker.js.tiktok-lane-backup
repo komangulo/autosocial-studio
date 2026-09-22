@@ -1,0 +1,616 @@
+const fs = require("fs/promises");
+const path = require("path");
+const { DateTime } = require("luxon");
+const { config } = require("./config");
+const { getAllAccounts, getAccountQueueDirs, requireAccount } = require("./account-manager");
+const { getFlowConfig } = require("./flow-config");
+const { generateUniqueDynamicPhrases, renderFlowPrompt } = require("./flow-prompt");
+const { prepareFlowRunDirectory } = require("./flow-downloads");
+const googleFlow = require("./google-flow");
+const { postSingleVideo } = require("./post-service");
+const { VIDEO_EXTENSIONS, getCaptionPaths, getSidecarPaths, readCaption } = require("./queue");
+const { fingerprintFile } = require("./file-fingerprint");
+
+function isInside(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return Boolean(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function exists(filePath) {
+  try { await fs.access(filePath); return true; } catch { return false; }
+}
+
+function nextPublicationDates(times, timezone, count, now = DateTime.now()) {
+  const localNow = now.setZone(timezone);
+  const results = [];
+  let dayOffset = 0;
+  while (results.length < count && dayOffset < 30) {
+    for (const time of times) {
+      const [hour, minute] = time.split(":").map(Number);
+      const candidate = localNow.startOf("day").plus({ days: dayOffset }).set({ hour, minute });
+      if (candidate > localNow) results.push(candidate.toUTC().toISO());
+      if (results.length === count) break;
+    }
+    dayOffset += 1;
+  }
+  return results;
+}
+
+async function processFlowOutputFiles(options) {
+  const {
+    files,
+    outputDir,
+    queueDirs,
+    flow,
+    job,
+    publishDates,
+    createReservedTikTokJob,
+    onProcessed,
+  } = options;
+  const childJobs = [];
+  const savedVideos = [];
+  const outputStat = await fs.lstat(outputDir);
+  if (outputStat.isSymbolicLink() || !outputStat.isDirectory()) {
+    throw new Error("Google Flow permanent output must be a real directory.");
+  }
+  const realOutputDir = await fs.realpath(outputDir);
+  const report = async (stage, current, total = files.length) => {
+    await onProcessed?.({ stage, current, total, savedVideos: [...savedVideos], childJobs: [...childJobs] });
+  };
+  for (let index = 0; index < files.length; index += 1) {
+    const filePath = path.resolve(files[index]);
+    if (!isInside(outputDir, filePath)) throw new Error("Google Flow returned a video outside its permanent download folder.");
+    const fileStat = await fs.lstat(filePath);
+    if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+      throw new Error("Google Flow returned a symbolic link instead of a real video file.");
+    }
+    const realFilePath = await fs.realpath(filePath);
+    if (!isInside(realOutputDir, realFilePath)) throw new Error("Google Flow returned a video outside its real permanent download folder.");
+    if (!VIDEO_EXTENSIONS.has(path.extname(filePath).toLowerCase()) || fileStat.size < 1024) {
+      throw new Error(`Flow output ${path.basename(filePath)} is not a valid video.`);
+    }
+    const safeName = `flow-${Date.now()}-${index + 1}${path.extname(filePath).toLowerCase() || ".mp4"}`;
+    const permanentPath = path.join(outputDir, safeName);
+    if (filePath !== permanentPath) await fs.rename(filePath, permanentPath);
+    savedVideos.push(safeName);
+    await report("permanent-saved", index + 1);
+    if (!flow.autoPublish) {
+      const target = path.join(queueDirs.pending, safeName);
+      await fs.copyFile(permanentPath, target);
+      if (flow.caption) await fs.writeFile(path.join(queueDirs.pending, `${path.parse(safeName).name}.description`), flow.caption, "utf8");
+      await report("pending-copied", index + 1);
+      continue;
+    }
+    const publishJob = await createReservedTikTokJob({
+      accountId: job.accountId,
+      sourcePath: permanentPath,
+      scheduledAt: publishDates[index],
+      caption: flow.caption,
+      source: "google-flow",
+      parentJobId: job.id,
+      trustedSource: true,
+      copySource: true,
+      dedupeKey: `flow-child:${job.id}:${index}`,
+    });
+    childJobs.push(publishJob.id);
+    await report("tiktok-reserved", index + 1);
+  }
+  return { childJobs, savedVideos };
+}
+
+class AutonomousWorker {
+  constructor(options) {
+    this.store = options.store;
+    this.pollMs = Number(options.pollMs) || 5000;
+    this.flowGenerator = options.flowGenerator || googleFlow.generateVideos;
+    this.publishVideo = options.publishVideo || postSingleVideo;
+    this.timer = null;
+    this.dispatching = false;
+    this.cancelRequested = false;
+    this.paused = false;
+    this.pausedStatePath = options.pausedStatePath
+      || path.join(path.dirname(config.autonomousStatePath), "autonomous-worker.paused");
+    this.laneBusy = { "tiktok-publish": false, "flow-generate": false };
+    this.lastTickAt = null;
+    this.lastError = null;
+  }
+
+  /**
+   * Read the persisted pause flag. When true the worker must stay stopped even
+   * across app restarts, so reopening the dashboard does not silently resume a
+   * batch the user had stopped.
+   */
+  async loadPausedState() {
+    try {
+      const raw = await fs.readFile(this.pausedStatePath, "utf8");
+      this.paused = raw.trim() === "1" || raw.trim() === "true";
+    } catch {
+      this.paused = false;
+    }
+    return this.paused;
+  }
+
+  async setPausedState(paused) {
+    this.paused = Boolean(paused);
+    try {
+      await fs.mkdir(path.dirname(this.pausedStatePath), { recursive: true });
+      await fs.writeFile(this.pausedStatePath, this.paused ? "1" : "0", "utf8");
+    } catch { /* best effort */ }
+    return this.paused;
+  }
+
+  async init() {
+    await this.loadPausedState();
+    await this.store.init();
+    await this.store.recoverInterrupted();
+    await this.reconcileFilesystemState();
+  }
+
+  /**
+   * Start polling. When the user stopped the worker before (persisted pause),
+   * reopening the app must NOT resume automatically: pass force=true to start
+   * anyway (used by the explicit Start / "schedule all now" actions).
+   */
+  start({ force = false } = {}) {
+    if (this.paused && !force) {
+      console.log("[autonomous-worker] Paused by the user; not starting automatically.");
+      return false;
+    }
+    if (this.paused && force) {
+      void this.setPausedState(false);
+    }
+    this.cancelRequested = false;
+    if (this.timer) return true;
+    this.timer = setInterval(() => this.tick().catch((error) => this.recordError(error)), this.pollMs);
+    this.timer.unref?.();
+    this.tick().catch((error) => this.recordError(error));
+    return true;
+  }
+
+  stop() {
+    this.cancelRequested = true;
+    void this.setPausedState(true);
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  /** Was a stop requested? Used to abandon an in-flight drain loop. */
+  isCancelled() {
+    return this.cancelRequested === true;
+  }
+
+  clearCancellation() {
+    this.cancelRequested = false;
+    void this.setPausedState(false);
+  }
+
+  /**
+   * Process every due TikTok job back-to-back right now, one at a time, until
+   * none are left or the user stops. Used by the dashboard "Start" so a whole
+   * folder is scheduled on TikTok in a single session instead of waiting on the
+   * poll.
+   */
+  async drainTikTokQueue({ maxJobs = 100, onJob } = {}) {
+    this.clearCancellation();
+    let processed = 0;
+    while (processed < maxJobs) {
+      if (this.isCancelled()) break;
+      const job = await this.store.claimDue(new Date(), { type: "tiktok-publish" });
+      if (!job) break;
+      await onJob?.(job);
+      if (this.isCancelled()) {
+        // Give the claimed job back so it can run later, then stop.
+        await this.store.release?.(job.id).catch?.(() => {});
+        break;
+      }
+      await this.runClaimedJob(job);
+      processed += 1;
+    }
+    return processed;
+  }
+
+  recordError(error) {
+    this.lastError = error.message;
+    console.error(`[autonomous-worker] ${error.stack || error.message}`);
+  }
+
+  getStatus() {
+    return {
+      running: Boolean(this.timer),
+      paused: Boolean(this.paused),
+      busy: Object.values(this.laneBusy).some(Boolean),
+      lanes: { ...this.laneBusy },
+      pollMs: this.pollMs,
+      lastTickAt: this.lastTickAt,
+      lastError: this.lastError,
+    };
+  }
+
+  async materializeFlowJobs(now = DateTime.now()) {
+    const accounts = await getAllAccounts();
+    for (const account of accounts) {
+      const flow = await getFlowConfig(account.id, { includePrivate: true });
+      if (!flow.enabled || !flow.fixedPromptTemplate || !flow.dynamicInstructions || !flow.geminiApiKey) continue;
+      const local = now.setZone(flow.timezone);
+      const localDate = local.toISODate();
+      if (local.toFormat("HH:mm") < flow.dailyTime) continue;
+      await this.store.createJob({
+        type: "flow-generate",
+        accountId: account.id,
+        scheduledAt: now.toUTC().toISO(),
+        maxAttempts: 1,
+        dedupeKey: `flow-daily:${account.id}:${localDate}`,
+        payload: { source: "daily", localDate },
+      });
+    }
+  }
+
+  async tick(now = DateTime.now()) {
+    if (this.dispatching) return;
+    this.dispatching = true;
+    this.lastTickAt = new Date().toISOString();
+    try {
+      await this.materializeFlowJobs(now);
+      await Promise.all([
+        this.dispatchLane("tiktok-publish", now.toJSDate()),
+        this.dispatchLane("flow-generate", now.toJSDate()),
+      ]);
+    } finally {
+      this.dispatching = false;
+    }
+  }
+
+  async dispatchLane(type, now) {
+    if (this.laneBusy[type]) return;
+    this.laneBusy[type] = true;
+    try {
+      const job = await this.store.claimDue(now, { type });
+      if (!job) {
+        this.laneBusy[type] = false;
+        return;
+      }
+      this.runClaimedJob(job).finally(() => { this.laneBusy[type] = false; });
+    } catch (error) {
+      this.laneBusy[type] = false;
+      throw error;
+    }
+  }
+
+  async runClaimedJob(job) {
+    try {
+      await this.store.updateProgress(job.id, { stage: "claimed" });
+      const result = job.type === "tiktok-publish"
+        ? await this.executeTikTokPublish(job)
+        : await this.executeFlowGeneration(job);
+      await this.store.complete(job.id, result);
+      this.lastError = null;
+    } catch (error) {
+      this.recordError(error);
+      await this.store.fail(job.id, error, { uncertain: Boolean(error.uncertain) }).catch((storeError) => this.recordError(storeError));
+    }
+  }
+
+  async createReservedTikTokJob(input) {
+    await requireAccount(input.accountId);
+    const dirs = getAccountQueueDirs(input.accountId).tiktok;
+    const source = path.resolve(input.sourcePath);
+    if (!input.trustedSource && path.dirname(source) !== path.resolve(dirs.pending)) {
+      throw new Error("The selected video is outside this account's pending queue.");
+    }
+    if (input.trustedSource && !isInside(config.projectRoot, source)) {
+      throw new Error("Generated video source is outside the project folder.");
+    }
+    if (!VIDEO_EXTENSIONS.has(path.extname(source).toLowerCase())) throw new Error("Unsupported video type.");
+    await fs.access(source);
+    const job = await this.store.createJob({
+      type: "tiktok-publish",
+      accountId: input.accountId,
+      scheduledAt: input.scheduledAt,
+      initialStatus: "preparing",
+      dedupeKey: input.dedupeKey,
+      payload: {
+        videoName: path.basename(source),
+        sourceRelativePath: path.relative(config.projectRoot, source),
+        caption: String(input.caption || ""),
+        source: input.source || "dashboard",
+        parentJobId: input.parentJobId || null,
+        trustedSource: Boolean(input.trustedSource),
+        copySource: Boolean(input.copySource),
+        nativeScheduledAt: input.nativeScheduledAt || null,
+        nativeTimezone: input.nativeTimezone || null,
+         location: input.location ? String(input.location).trim() : null,
+         aiGenerated: Boolean(input.aiGenerated),
+         sourceFingerprint: input.sourceFingerprint || null,
+      },
+    });
+    if (job.status !== "preparing") return job;
+    try {
+      return await this.reserveTikTokVideo(job);
+    } catch (error) {
+      await this.store.fail(job.id, error).catch(() => {});
+      throw error;
+    }
+  }
+
+  async reserveTikTokVideo(job) {
+    if (job.type !== "tiktok-publish" || job.status !== "preparing") throw new Error("TikTok job is not ready for reservation.");
+    await requireAccount(job.accountId);
+    const dirs = getAccountQueueDirs(job.accountId).tiktok;
+    const source = path.resolve(config.projectRoot, String(job.payload.sourceRelativePath || ""));
+    if (!job.payload.trustedSource && path.dirname(source) !== path.resolve(dirs.pending)) {
+      throw new Error("The selected video is outside this account's pending queue.");
+    }
+    if (job.payload.trustedSource && !isInside(config.projectRoot, source)) {
+      throw new Error("Generated video source is outside the project folder.");
+    }
+    const reservationDir = path.join(dirs.scheduled, job.id);
+    const target = path.join(reservationDir, job.payload.videoName);
+    await this.store.patchPayload(job.id, { reservedRelativePath: path.relative(config.projectRoot, target) });
+    await fs.mkdir(reservationDir, { recursive: true });
+
+    if (!(await exists(target))) {
+      if (!(await exists(source))) throw new Error("Neither the source nor reserved video exists.");
+      if (job.payload.copySource) await fs.copyFile(source, target);
+      else await fs.rename(source, target);
+    }
+    const reservedFingerprint = await fingerprintFile(target);
+    if (job.payload.sourceFingerprint?.sha256 && reservedFingerprint.sha256 !== job.payload.sourceFingerprint.sha256) {
+      throw new Error(`El archivo reservado para TikTok no coincide con el video preparado (${job.payload.videoName}).`);
+    }
+    await this.store.patchPayload(job.id, { reservedFingerprint });
+    for (const sourceCaption of getSidecarPaths(source)) {
+      const targetCaption = path.join(reservationDir, path.basename(sourceCaption));
+      if (await exists(targetCaption)) continue;
+      if (!(await exists(sourceCaption))) continue;
+      if (job.payload.copySource) await fs.copyFile(sourceCaption, targetCaption);
+      else await fs.rename(sourceCaption, targetCaption);
+    }
+    if (job.payload.caption) {
+      const parsed = path.parse(target);
+      await fs.writeFile(path.join(parsed.dir, `${parsed.name}.description`), job.payload.caption, "utf8");
+    }
+    return this.store.markScheduled(job.id);
+  }
+
+  async releaseReservation(job) {
+    if (job.type !== "tiktok-publish" || !job.payload?.reservedRelativePath) return;
+    const dirs = getAccountQueueDirs(job.accountId).tiktok;
+    const reserved = path.resolve(config.projectRoot, job.payload.reservedRelativePath);
+    if (!isInside(dirs.scheduled, reserved)) throw new Error("Scheduled video reservation is invalid.");
+    if (!(await exists(reserved))) return;
+    const parsed = path.parse(path.basename(reserved));
+    let stem = parsed.name;
+    if (await exists(path.join(dirs.pending, `${stem}${parsed.ext}`))) stem = `${stem}-restored-${Date.now()}`;
+    await fs.rename(reserved, path.join(dirs.pending, `${stem}${parsed.ext}`));
+    for (const captionPath of getSidecarPaths(reserved)) {
+      if (!(await exists(captionPath))) continue;
+      const suffix = path.basename(captionPath).slice(parsed.name.length);
+      await fs.rename(captionPath, path.join(dirs.pending, `${stem}${suffix}`));
+    }
+    await fs.rm(path.dirname(reserved), { recursive: true, force: true });
+  }
+
+  async reconcileFilesystemState() {
+    const jobs = await this.store.listJobs({ limit: 500 });
+    for (const job of jobs) {
+      try {
+        if (job.status === "preparing" && job.type === "tiktok-publish") {
+          await this.reserveTikTokVideo(job);
+        } else if (job.status === "cancelling") {
+          await this.releaseReservation(job);
+          await this.store.finishCancel(job.id, job.accountId);
+        } else if (job.status === "retry" && job.type === "tiktok-publish") {
+          await this.restoreProcessingReservation(job);
+        } else if (
+          job.status === "failed" &&
+          job.type === "flow-generate" &&
+          Array.isArray(job.progress?.downloadedFiles) &&
+          job.progress.downloadedFiles.length &&
+          !(Array.isArray(job.progress?.savedVideos) && job.progress.savedVideos.length)
+        ) {
+          await this.recoverInterruptedFlowDownloads(job);
+        }
+      } catch (error) {
+        await this.store.fail(job.id, error).catch(() => {});
+      }
+    }
+  }
+
+  async recoverInterruptedFlowDownloads(job) {
+    const downloadedFiles = Array.from(new Set(job.progress.downloadedFiles.map((filePath) => path.resolve(filePath))));
+    const outputDir = await prepareFlowRunDirectory(job.accountId, job.id);
+    const files = [];
+    for (const filePath of downloadedFiles) {
+      if (await exists(filePath)) files.push(filePath);
+    }
+    if (!files.length) return;
+
+    const flow = await getFlowConfig(job.accountId, { includePrivate: true });
+    const dirs = getAccountQueueDirs(job.accountId).tiktok;
+    const publishDates = nextPublicationDates(flow.publicationTimes, flow.timezone, files.length);
+    const baseProgress = {
+      downloadedFiles,
+      persistedFiles: Array.isArray(job.progress.persistedFiles) ? job.progress.persistedFiles : downloadedFiles,
+    };
+    const { childJobs, savedVideos } = await processFlowOutputFiles({
+      files,
+      outputDir,
+      queueDirs: dirs,
+      flow,
+      job,
+      publishDates,
+      createReservedTikTokJob: (input) => this.createReservedTikTokJob(input),
+      onProcessed: (progress) => this.store.updateFailedProgress(job.id, {
+        ...progress,
+        ...baseProgress,
+        total: downloadedFiles.length,
+      }),
+    });
+    await this.store.updateFailedProgress(job.id, {
+      stage: "recovered-saved",
+      current: savedVideos.length,
+      total: downloadedFiles.length,
+      ...baseProgress,
+      savedVideos,
+      childJobs,
+    });
+  }
+
+  async restoreProcessingReservation(job) {
+    const dirs = getAccountQueueDirs(job.accountId).tiktok;
+    const reserved = path.resolve(config.projectRoot, String(job.payload.reservedRelativePath || ""));
+    if (isInside(dirs.scheduled, reserved) && await exists(reserved)) return;
+    const processing = path.join(dirs.processing, job.id, job.payload.videoName);
+    if (!(await exists(processing)) || !isInside(dirs.processing, processing)) {
+      throw new Error("Interrupted publication video could not be recovered.");
+    }
+    await fs.mkdir(path.dirname(reserved), { recursive: true });
+    await fs.rename(processing, reserved);
+    for (const captionPath of getSidecarPaths(processing)) {
+      if (await exists(captionPath)) await fs.rename(captionPath, path.join(path.dirname(reserved), path.basename(captionPath)));
+    }
+    await fs.rm(path.dirname(processing), { recursive: true, force: true });
+  }
+
+  async executeTikTokPublish(job) {
+    await requireAccount(job.accountId);
+    const dirs = getAccountQueueDirs(job.accountId).tiktok;
+    const reserved = path.resolve(config.projectRoot, String(job.payload.reservedRelativePath || ""));
+    if (!isInside(dirs.scheduled, reserved)) throw new Error("Scheduled video reservation is invalid.");
+    await fs.access(reserved);
+    await this.store.updateProgress(job.id, { stage: "moving-to-processing" });
+
+    const processingDir = path.join(dirs.processing, job.id);
+    await fs.mkdir(processingDir, { recursive: true });
+    const processingVideo = path.join(processingDir, path.basename(reserved));
+    await fs.rename(reserved, processingVideo);
+    for (const captionPath of getSidecarPaths(reserved)) {
+      try { await fs.rename(captionPath, path.join(processingDir, path.basename(captionPath))); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    const uploadFingerprint = await fingerprintFile(processingVideo);
+    if (job.payload.reservedFingerprint?.sha256 && uploadFingerprint.sha256 !== job.payload.reservedFingerprint.sha256) {
+      throw new Error(`El archivo que se iba a subir a TikTok no coincide con el reservado (${job.payload.videoName}).`);
+    }
+    await this.store.updateProgress(job.id, {
+      stage: "upload-file",
+      videoName: job.payload.videoName,
+      uploadFile: uploadFingerprint,
+    });
+    await fs.writeFile(
+      path.resolve(config.projectRoot, "last-upload-file.json"),
+      JSON.stringify({
+        jobId: job.id,
+        videoName: job.payload.videoName,
+        path: processingVideo,
+        sourceFingerprint: job.payload.sourceFingerprint || null,
+        reservedFingerprint: job.payload.reservedFingerprint || null,
+        uploadFingerprint,
+      }, null, 2),
+      "utf8",
+    );
+    await this.store.updateProgress(job.id, { stage: "browser-starting" });
+    const caption = job.payload.caption || await readCaption(processingVideo) || "";
+    let remoteMayHaveChanged = false;
+    const remoteScheduleAt = job.payload.nativeScheduledAt || null;
+    const result = await this.publishVideo({
+      videoPath: processingVideo,
+      caption,
+      source: `scheduled-job:${job.id}`,
+      postedDir: dirs.posted,
+      failedDir: dirs.failed,
+      accountId: job.accountId,
+      scheduledAt: remoteScheduleAt,
+      scheduleTimezone: job.payload.nativeTimezone || null,
+      location: job.payload.location || null,
+      aiGenerated: Boolean(job.payload.aiGenerated),
+      onPhase: async (stage) => {
+        if ([
+          "publish-clicking", "publish-submitted", "publish-confirmed",
+          "schedule-setting", "schedule-clicking", "schedule-submitted", "schedule-confirmed",
+          "archiving",
+        ].includes(stage)) remoteMayHaveChanged = true;
+        await this.store.updateProgress(job.id, { stage });
+      },
+    });
+    if (!result.ok) {
+      const error = new Error(result.error || "TikTok publication failed.");
+      error.uncertain = remoteMayHaveChanged || /posted, but could not archive/i.test(error.message);
+      throw error;
+    }
+    await fs.rm(processingDir, { recursive: true, force: true });
+    await fs.rm(path.dirname(reserved), { recursive: true, force: true });
+    return result;
+  }
+
+  async executeFlowGeneration(job) {
+    await requireAccount(job.accountId);
+    const flow = await getFlowConfig(job.accountId, { includePrivate: true });
+    if (!flow.fixedPromptTemplate) throw new Error("The fixed Google Flow prompt is empty.");
+    if (!flow.dynamicInstructions) throw new Error("Dynamic content instructions are empty.");
+    if (!flow.geminiApiKey) throw new Error("A Gemini API key is required for dynamic prompts.");
+    await this.store.updateProgress(job.id, { stage: "generating-phrases", current: 0, total: flow.videosPerDay });
+    const dynamicPhrases = await generateUniqueDynamicPhrases({
+      accountId: job.accountId,
+      apiKey: flow.geminiApiKey,
+      instructions: flow.dynamicInstructions,
+      count: flow.videosPerDay,
+    });
+    const prompts = dynamicPhrases.map((phrase) => renderFlowPrompt(flow.fixedPromptTemplate, phrase));
+    const outputDir = await prepareFlowRunDirectory(job.accountId, job.id);
+    let files;
+    let generationError = null;
+    try {
+      files = await this.flowGenerator({
+        accountId: job.accountId,
+        prompts,
+        referenceImage: flow.referenceImage?.path || "",
+        outputDir,
+        onProgress: (progress) => this.store.updateProgress(job.id, progress).catch(() => {}),
+      });
+    } catch (error) {
+      generationError = error;
+      files = Array.isArray(error.completedFiles) ? error.completedFiles : [];
+      if (!files.length) throw error;
+    }
+    if (!Array.isArray(files) || (!generationError && files.length < prompts.length)) {
+      throw new Error(`Google Flow returned ${files?.length || 0} of ${prompts.length} requested videos.`);
+    }
+
+    const dirs = getAccountQueueDirs(job.accountId).tiktok;
+    const publishDates = nextPublicationDates(flow.publicationTimes, flow.timezone, files.length);
+    const { childJobs, savedVideos } = await processFlowOutputFiles({
+      files,
+      outputDir,
+      queueDirs: dirs,
+      flow,
+      job,
+      publishDates,
+      createReservedTikTokJob: (input) => this.createReservedTikTokJob(input),
+      onProcessed: (progress) => this.store.updateProgress(job.id, { ...progress, total: prompts.length }),
+    });
+    const result = {
+      generated: files.length,
+      childJobs,
+      autoPublish: flow.autoPublish,
+      dynamicPhrases: dynamicPhrases.slice(0, files.length),
+      savedVideos,
+      downloadsRelativePath: path.relative(config.projectRoot, outputDir),
+    };
+    if (generationError) {
+      await this.store.updateProgress(job.id, {
+        stage: "partial-saved",
+        current: files.length,
+        total: prompts.length,
+        savedVideos,
+        childJobs,
+      });
+      const destination = flow.autoPublish ? "reserved for TikTok" : "copied to the TikTok pending queue";
+      generationError.message = `${generationError.message} ${files.length} completed video(s) were permanently saved and ${destination} before the later generation failed.`;
+      throw generationError;
+    }
+    return result;
+  }
+}
+
+module.exports = { AutonomousWorker, nextPublicationDates, isInside, processFlowOutputFiles };

@@ -1,0 +1,463 @@
+diff --git a/src/dashboard-server.js b/src/dashboard-server.js
+index 3242f9c..4cff8d6 100644
+--- a/src/dashboard-server.js
++++ b/src/dashboard-server.js
+@@ -16,6 +16,9 @@ const { JobStore } = require("./job-store");
+ const { AutonomousWorker } = require("./autonomous-worker");
+ const {
+   startDashboardLoginSession: startTikTokLoginSession,
++  startAssistedTikTokAccountSetup,
++  confirmAssistedTikTokAccountSetup,
++  getAssistedAccountSetupStatus,
+   startTempMailSetupSession,
+   retryTempMailCapture,
+   getTempMailSetupStatus,
+@@ -41,6 +44,7 @@ const {
+   ensureAccountDirs,
+   getAccountQueueDirs,
+   requireAccount,
++  hasSavedPlatformSession,
+ } = require("./account-manager");
+ const { accountVault, generateTikTokPassword } = require("./account-vault");
+ const googleFlow = require("./google-flow");
+@@ -163,11 +167,12 @@ async function buildManagedAccountsResponse() {
+     vaultProtection: "Windows DPAPI (current Windows user)",
+     weeklyAvailability: vaultSnapshot.weeklyAvailability,
+     activeAccountId: state.activeAccountId,
+-    onboarding: getTempMailSetupStatus(),
+-    accounts: state.accounts.map((account) => ({
++    onboarding: getAssistedAccountSetupStatus(),
++    accounts: await Promise.all(state.accounts.map(async (account) => ({
+       ...account,
+       credentials: summaryById.get(account.id) || null,
+-    })),
++      sessionSaved: await hasSavedPlatformSession("tiktok", account.id),
++    }))),
+   };
+ }
+ 
+@@ -773,6 +778,39 @@ async function createServer() {
+     }
+   });
+ 
++  app.post("/api/account-manager/create-assisted", async (req, res) => {
++    try {
++      const accounts = await getAllAccounts();
++      const name = String(req.body?.name || "").trim() || getNextTikTokAccountName(accounts);
++      const account = await addAccount(name);
++      await getDaemons(account.id);
++      const browser = await startAssistedTikTokAccountSetup(account.id);
++      res.json({ ok: true, ...browser, manager: await buildManagedAccountsResponse() });
++    } catch (error) {
++      res.status(400).json({ ok: false, error: error.message });
++    }
++  });
++
++  app.post("/api/account-manager/open-assisted", async (req, res) => {
++    try {
++      const account = await requireAccount(req.body?.accountId);
++      await selectAccount(account.id);
++      const browser = await startAssistedTikTokAccountSetup(account.id);
++      res.json({ ok: true, ...browser, manager: await buildManagedAccountsResponse() });
++    } catch (error) {
++      res.status(400).json({ ok: false, error: error.message });
++    }
++  });
++
++  app.post("/api/account-manager/confirm-assisted", async (req, res) => {
++    try {
++      const status = await confirmAssistedTikTokAccountSetup();
++      res.json({ ok: true, status, manager: await buildManagedAccountsResponse() });
++    } catch (error) {
++      res.status(400).json({ ok: false, error: error.message });
++    }
++  });
++
+   app.post("/api/account-manager/create-temp-mail", async (req, res) => {
+     try {
+       const result = await runSerializedTempAccountCreation(async () => {
+diff --git a/src/tiktok-uploader.js b/src/tiktok-uploader.js
+index 860b723..6e66980 100644
+--- a/src/tiktok-uploader.js
++++ b/src/tiktok-uploader.js
+@@ -28,6 +28,14 @@ let tempMailSetupState = {
+   startedAt: null,
+   completedAt: null,
+ };
++let assistedAccountSetupState = {
++  accountId: null,
++  open: false,
++  stage: "idle",
++  message: "No assisted TikTok account setup is running.",
++  startedAt: null,
++  completedAt: null,
++};
+ 
+ /**
+  * // MARKER: TIKTOK-PROFILE-RELEASE-v1
+@@ -2883,6 +2891,87 @@ function startDashboardLoginSessionDetached() {
+   return { ok: true, opening: true, message: "Abriendo Chromium..." };
+ }
+ 
++async function selectTikTokSignupDate(page) {
++  const fields = [
++    { label: "Month", value: "April" },
++    { label: "Day", value: "18" },
++    { label: "Year", value: "1988" },
++  ];
++
++  for (const field of fields) {
++    const combobox = page.getByRole("combobox", { name: new RegExp(`^${field.label}\\.`) }).first();
++    await combobox.waitFor({ state: "visible", timeout: 15000 });
++    await combobox.click();
++    const option = page.getByRole("option", { name: field.value, exact: true }).last();
++    await option.waitFor({ state: "visible", timeout: 10000 });
++    await option.click();
++  }
++}
++
++async function prepareTikTokSignup(page) {
++  const channel = page
++    .locator('[data-e2e="channel-item"]')
++    .filter({ hasText: "Use phone or email" })
++    .first();
++  await channel.waitFor({ state: "visible", timeout: 20000 });
++  await channel.click();
++
++  const emailLink = page.locator('a[href="/signup/phone-or-email/email"]').first();
++  await emailLink.waitFor({ state: "visible", timeout: 20000 });
++  await emailLink.click();
++  await selectTikTokSignupDate(page);
++}
++
++async function startAssistedTikTokAccountSetup(accountId) {
++  const account = await requireAccount(accountId);
++  const { context, alreadyOpen } = await openLoginContextForAccount(account.id);
++  const page = context.pages()[0] || (await context.newPage());
++
++  if (!alreadyOpen || !/tiktok\.com/i.test(page.url())) {
++    await page.goto("https://www.tiktok.com/signup", { waitUntil: "domcontentloaded" });
++  }
++
++  let setupMessage = "Completa manualmente el correo, la contrasena, el CAPTCHA y el codigo de verificacion.";
++  let setupStage = "manual-signup";
++  try {
++    await prepareTikTokSignup(page);
++    setupMessage = "Metodo de registro y fecha 18/04/1988 preparados. Completa manualmente el correo, la contrasena, el CAPTCHA y el codigo de verificacion.";
++  } catch (error) {
++    setupStage = "needs-attention";
++    setupMessage = `TikTok no mostro el formulario esperado. Completa los pasos iniciales manualmente. Detalle: ${error.message}`;
++  }
++
++  assistedAccountSetupState = {
++    accountId: account.id,
++    open: true,
++    stage: setupStage,
++    message: setupMessage,
++    startedAt: new Date().toISOString(),
++    completedAt: null,
++  };
++  return { ok: true, account, status: getAssistedAccountSetupStatus() };
++}
++
++async function confirmAssistedTikTokAccountSetup() {
++  const accountId = assistedAccountSetupState.accountId;
++  if (!accountId) throw new Error("No hay un registro asistido en curso.");
++  const saved = await hasSavedPlatformSession("tiktok", accountId);
++  if (!saved) {
++    throw new Error("No detecto una sesion guardada todavia. Termina el registro e inicia sesion en TikTok.");
++  }
++  assistedAccountSetupState = {
++    ...assistedAccountSetupState,
++    stage: "ready",
++    message: "Cuenta confirmada. La sesion se conserva en el perfil persistente de esta cuenta.",
++    completedAt: new Date().toISOString(),
++  };
++  return getAssistedAccountSetupStatus();
++}
++
++function getAssistedAccountSetupStatus() {
++  return { ...assistedAccountSetupState };
++}
++
+ async function captureTempMailForAccount(accountId) {
+   if (!tempMailSetupPage || tempMailSetupPage.isClosed()) {
+     tempMailSetupPage = loginSessionContext?.pages()
+@@ -3001,6 +3090,14 @@ async function closeLoginSession() {
+       ? "Temporary email saved. The Chromium window is closed."
+       : "The Chromium setup window was closed.",
+   };
++  assistedAccountSetupState = {
++    ...assistedAccountSetupState,
++    open: false,
++    stage: assistedAccountSetupState.stage === "ready" ? "ready" : "closed",
++    message: assistedAccountSetupState.stage === "ready"
++      ? "Cuenta confirmada. El perfil persistente esta cerrado."
++      : "La ventana de registro fue cerrada.",
++  };
+   return { ok: true, alreadyClosed: false };
+ }
+ 
+@@ -3147,6 +3244,9 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
+ module.exports = {
+   startLoginSession: startLoginSessionCli,
+   startDashboardLoginSession: startDashboardLoginSessionDetached,
++  startAssistedTikTokAccountSetup,
++  confirmAssistedTikTokAccountSetup,
++  getAssistedAccountSetupStatus,
+   startTempMailSetupSession,
+   retryTempMailCapture,
+   getTempMailSetupStatus,
+diff --git a/web/app.js b/web/app.js
+index 289e720..a8b6d3b 100644
+--- a/web/app.js
++++ b/web/app.js
+@@ -104,14 +104,15 @@ const UI = {
+     ttLogsContainer: document.getElementById("ttLogsContainer"),
+     accountsTableBody: document.getElementById("accountsTableBody"),
+     managedAccountsTableBody: document.getElementById("managedAccountsTableBody"),
+-    createTempMailAccountBtn: document.getElementById("createTempMailAccountBtn"),
++    createTikTokAccountBtn: document.getElementById("createTikTokAccountBtn"),
+     accountVaultMessage: document.getElementById("accountVaultMessage"),
+     accountWeeklyBadge: document.getElementById("accountWeeklyBadge"),
+     accountOnboardingPanel: document.getElementById("accountOnboardingPanel"),
+     accountOnboardingBadge: document.getElementById("accountOnboardingBadge"),
+     accountOnboardingMessage: document.getElementById("accountOnboardingMessage"),
+-    accountRetryCaptureBtn: document.getElementById("accountRetryCaptureBtn"),
++    accountConfirmSetupBtn: document.getElementById("accountConfirmSetupBtn"),
+     accountCloseBrowserBtn: document.getElementById("accountCloseBrowserBtn"),
++    newTikTokAccountName: document.getElementById("newTikTokAccountName"),
+ 
+     ttRunBtn: document.getElementById("ttRunBtn"),
+     ttStartBtn: document.getElementById("ttStartBtn"),
+@@ -613,14 +614,14 @@ const UI = {
+         this.handleManagedAccountsClick(event)
+       );
+     }
+-    if (this.els.createTempMailAccountBtn) {
+-      this.els.createTempMailAccountBtn.addEventListener("click", () =>
+-        this.createTempMailAccount()
++    if (this.els.createTikTokAccountBtn) {
++      this.els.createTikTokAccountBtn.addEventListener("click", () =>
++        this.createTikTokAccount()
+       );
+     }
+-    if (this.els.accountRetryCaptureBtn) {
+-      this.els.accountRetryCaptureBtn.addEventListener("click", () =>
+-        this.retryTempMailCapture()
++    if (this.els.accountConfirmSetupBtn) {
++      this.els.accountConfirmSetupBtn.addEventListener("click", () =>
++        this.confirmTikTokAccountSetup()
+       );
+     }
+     if (this.els.accountCloseBrowserBtn) {
+@@ -2455,20 +2456,21 @@ const UI = {
+     prompt(`${label} - copy this value:`, String(value));
+   },
+ 
+-  async createTempMailAccount() {
+-    const button = this.els.createTempMailAccountBtn;
++  async createTikTokAccount() {
++    const button = this.els.createTikTokAccountBtn;
+     if (button) {
+       button.disabled = true;
+-      button.innerHTML = '<i class="ph ph-circle-notch"></i> Opening Chromium';
++      button.innerHTML = '<i class="ph ph-circle-notch"></i> Abriendo registro';
+     }
+     try {
+-      await API.post("/api/account-manager/create-temp-mail");
++      const name = this.els.newTikTokAccountName?.value.trim() || "";
++      await API.post("/api/account-manager/create-assisted", { name });
+       await this.refresh();
+     } catch (error) {
+-      alert(`Temporary email setup failed: ${error.message}`);
++      alert(`No se pudo abrir el registro asistido: ${error.message}`);
+     } finally {
+       if (button) {
+-        button.innerHTML = '<i class="ph ph-plus-circle"></i> Create new account';
++        button.innerHTML = '<i class="ph ph-plus-circle"></i> Crear cuenta TikTok';
+       }
+       try {
+         this.renderManagedAccounts(await API.get("/api/account-manager"));
+@@ -2478,12 +2480,12 @@ const UI = {
+     }
+   },
+ 
+-  async retryTempMailCapture() {
++  async confirmTikTokAccountSetup() {
+     try {
+-      await API.post("/api/account-manager/retry-capture");
++      await API.post("/api/account-manager/confirm-assisted");
+       await this.refresh();
+     } catch (error) {
+-      alert(`Mailbox capture failed: ${error.message}`);
++      alert(`La cuenta todavía no está lista: ${error.message}`);
+     }
+   },
+ 
+@@ -2509,19 +2511,10 @@ const UI = {
+         return;
+       }
+       if (action === "copy-email") {
+-        await this.copyAccountValue(button.dataset.value || "", "Temporary email");
+-        return;
+-      }
+-      if (action === "copy-secret") {
+-        const result = await API.post("/api/account-manager/reveal", {
+-          accountId,
+-          field: button.dataset.field,
+-        });
+-        await this.copyAccountValue(result.value, button.dataset.label || "Credential");
+         return;
+       }
+       if (action === "open") {
+-        await API.post("/api/account-manager/open", { accountId });
++        await API.post("/api/account-manager/open-assisted", { accountId });
+         await this.refresh();
+       }
+     } catch (error) {
+@@ -2531,27 +2524,12 @@ const UI = {
+ 
+   renderManagedAccounts(data) {
+     if (!data || typeof data !== "object") return;
+-    const vaultAvailable = Boolean(data.vaultAvailable);
+-    const weekly = data.weeklyAvailability || { allowed: false };
+     if (this.els.accountVaultMessage) {
+-      this.els.accountVaultMessage.textContent = vaultAvailable
+-        ? `All email addresses, recovery keys, and TikTok passwords are stored together in account-vault.json, encrypted for the current Windows user with DPAPI.`
+-        : "The encrypted credential vault is unavailable. Run AutoSocial on Windows 11 under your normal Windows user.";
+-    }
+-    if (this.els.accountWeeklyBadge) {
+-      const allowed = vaultAvailable && weekly.allowed;
+-      this.els.accountWeeklyBadge.classList.toggle("active", allowed);
+-      this.els.accountWeeklyBadge.textContent = allowed
+-        ? "One account may be prepared now"
+-        : weekly.nextAllowedAt
+-          ? `Next account: ${new Date(weekly.nextAllowedAt).toLocaleString()}`
+-          : "Windows credential vault required";
+-    }
+-    if (this.els.createTempMailAccountBtn) {
+-      this.els.createTempMailAccountBtn.disabled = !vaultAvailable || !weekly.allowed;
+-      this.els.createTempMailAccountBtn.title = this.els.createTempMailAccountBtn.disabled && weekly.nextAllowedAt
+-        ? `Weekly limit active until ${new Date(weekly.nextAllowedAt).toLocaleString()}`
+-        : "";
++      this.els.accountVaultMessage.textContent = "La sesion se conserva en el perfil persistente separado de cada cuenta. No se guardan contrasenas ni claves de recuperacion.";
++    }
++    if (this.els.createTikTokAccountBtn) {
++      this.els.createTikTokAccountBtn.disabled = false;
++      this.els.createTikTokAccountBtn.title = "Abre un perfil separado y el registro manual de TikTok.";
+     }
+ 
+     const onboarding = data.onboarding || {};
+@@ -2567,8 +2545,8 @@ const UI = {
+       const emailSuffix = onboarding.email ? ` Email: ${onboarding.email}.` : "";
+       this.els.accountOnboardingMessage.textContent = `${onboarding.message || ""}${emailSuffix}`;
+     }
+-    if (this.els.accountRetryCaptureBtn) {
+-      this.els.accountRetryCaptureBtn.disabled = !onboarding.open || !["needs-attention", "closed"].includes(onboarding.stage);
++    if (this.els.accountConfirmSetupBtn) {
++      this.els.accountConfirmSetupBtn.disabled = !onboarding.open;
+     }
+     if (this.els.accountCloseBrowserBtn) {
+       this.els.accountCloseBrowserBtn.disabled = !onboarding.open;
+@@ -2578,30 +2556,25 @@ const UI = {
+     const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+     this.els.managedAccountsTableBody.innerHTML = accounts.length
+       ? accounts.map((account) => {
+-        const credentials = account.credentials;
+         const isActive = account.id === data.activeAccountId;
+-        const email = credentials?.tempMailEmail || "Not prepared";
+-        const status = credentials?.status || "No credentials";
++        const sessionSaved = Boolean(account.sessionSaved);
++        const status = sessionSaved ? "session saved" : isActive ? "setup in progress" : "not connected";
+         return `
+           <tr class="${isActive ? "managed-account-active" : ""}">
+             <td>
+               <div class="managed-account-name">${escapeHtml(account.name)}</div>
+               <small class="mono">${escapeHtml(account.id)}</small>
+             </td>
+-            <td>
+-              <div class="managed-account-email">${escapeHtml(email)}</div>
+-              ${credentials?.tempMailEmail ? `<button class="credential-link" data-account-action="copy-email" data-account-id="${escapeHtml(account.id)}" data-value="${escapeHtml(credentials.tempMailEmail)}">Copy email</button>` : ""}
+-            </td>
+-            <td>${credentials?.hasRecoveryKey ? `<span class="credential-saved">Saved</span><button class="credential-link" data-account-action="copy-secret" data-account-id="${escapeHtml(account.id)}" data-field="tempMailRecoveryKey" data-label="Recovery key">Copy</button>` : "-"}</td>
+-            <td>${credentials?.hasTikTokPassword ? `<span class="credential-saved">Saved</span><button class="credential-link" data-account-action="copy-secret" data-account-id="${escapeHtml(account.id)}" data-field="tiktokPassword" data-label="TikTok password">Copy</button>` : "-"}</td>
+-            <td><span class="status-badge ${status === "email-ready" ? "active" : ""}">${escapeHtml(status.replace(/-/g, " "))}</span></td>
++            <td><span class="mono">.profiles/${escapeHtml(account.id)}/tiktok</span></td>
++            <td><span class="status-badge ${sessionSaved ? "active" : ""}">${sessionSaved ? "Saved" : "Not saved"}</span></td>
++            <td><span class="status-badge ${sessionSaved ? "active" : ""}">${escapeHtml(status.replace(/-/g, " "))}</span></td>
+             <td><div class="account-action-row">
+               <button class="control-btn-small" data-account-action="select" data-account-id="${escapeHtml(account.id)}" ${isActive ? "disabled" : ""}>${isActive ? "Selected" : "Select"}</button>
+-              ${credentials ? `<button class="control-btn-small" data-account-action="open" data-account-id="${escapeHtml(account.id)}"><i class="ph ph-browser"></i> Open tabs</button>` : ""}
++              <button class="control-btn-small" data-account-action="open" data-account-id="${escapeHtml(account.id)}"><i class="ph ph-browser"></i> Open signup</button>
+             </div></td>
+           </tr>`;
+       }).join("")
+-      : '<tr><td colspan="6">No local accounts found.</td></tr>';
++      : '<tr><td colspan="5">No local accounts found.</td></tr>';
+   },
+ 
+   renderAccounts() {
+diff --git a/web/index.html b/web/index.html
+index d3b1a88..448a261 100644
+--- a/web/index.html
++++ b/web/index.html
+@@ -447,29 +447,31 @@
+         <header class="view-header">
+           <div>
+             <h2>TikTok Account Manager</h2>
+-            <span class="view-subtitle">Temporary mailbox records and Chromium sessions stored locally.</span>
++            <span class="view-subtitle">Registro asistido y un perfil persistente de Chromium por cuenta.</span>
+           </div>
+-          <button id="createTempMailAccountBtn" class="control-btn-small primary account-create-button">
+-            <i class="ph ph-plus-circle"></i> Create new account
++          <button id="createTikTokAccountBtn" class="control-btn-small primary account-create-button">
++            <i class="ph ph-plus-circle"></i> Crear cuenta TikTok
+           </button>
+         </header>
+ 
+         <div class="card account-vault-summary">
+           <div>
+-            <div class="card-title">Encrypted local account vault</div>
+-            <p id="accountVaultMessage" class="form-hint">Checking Windows credential protection...</p>
++            <div class="card-title">Sesiones locales protegidas</div>
++            <p id="accountVaultMessage" class="form-hint">Cada cuenta usa un perfil persistente separado. Completa el registro manualmente con tus datos reales.</p>
+           </div>
+-          <span id="accountWeeklyBadge" class="status-badge">Checking weekly limit</span>
++          <span class="status-badge active">Registro manual</span>
+         </div>
+ 
+         <div id="accountOnboardingPanel" class="card account-onboarding-panel hidden">
+           <div class="card-header">
+-            <div class="card-title">Temporary email setup</div>
++            <div class="card-title">Crear cuenta TikTok de forma asistida</div>
+             <span id="accountOnboardingBadge" class="status-badge">Idle</span>
+           </div>
++          <label class="form-hint" for="newTikTokAccountName">Nombre interno de la cuenta</label>
++          <input id="newTikTokAccountName" class="control-input" type="text" maxlength="60" placeholder="Ej. TikTok marca principal" />
+           <p id="accountOnboardingMessage" class="form-hint"></p>
+           <div class="account-action-row">
+-            <button id="accountRetryCaptureBtn" class="control-btn-small"><i class="ph ph-arrows-clockwise"></i> Retry capture</button>
++            <button id="accountConfirmSetupBtn" class="control-btn-small"><i class="ph ph-check-circle"></i> Comprobar cuenta terminada</button>
+             <button id="accountCloseBrowserBtn" class="control-btn-small danger"><i class="ph ph-x-circle"></i> Close Chromium</button>
+           </div>
+         </div>
+@@ -481,15 +483,14 @@
+               <thead>
+                 <tr>
+                   <th>Local account</th>
+-                  <th>Temporary email</th>
+-                  <th>Recovery</th>
+-                  <th>TikTok password</th>
++                  <th>Browser profile</th>
++                  <th>Session</th>
+                   <th>Status</th>
+                   <th>Actions</th>
+                 </tr>
+               </thead>
+               <tbody id="managedAccountsTableBody">
+-                <tr><td colspan="6">Loading account vault...</td></tr>
++                <tr><td colspan="5">Loading accounts...</td></tr>
+               </tbody>
+             </table>
+           </div>
