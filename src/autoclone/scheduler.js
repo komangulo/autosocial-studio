@@ -9,6 +9,7 @@
 
 const fs = require("fs/promises");
 const path = require("path");
+const crypto = require("crypto");
 const { DateTime } = require("luxon");
 const { config } = require("../config");
 const { getAccountQueueDirs } = require("../account-manager");
@@ -16,9 +17,43 @@ const { VIDEO_EXTENSIONS, getCaptionPaths, getMetaPath, getThumbnailPaths, getSi
 const { fingerprintFile } = require("../file-fingerprint");
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const AUTOPOST_STATE_DIR = path.resolve(config.projectRoot, ".runtime", "autopost");
+
+function autopostDedupeKey(accountId, folder, videoName) {
+  const value = `${String(accountId || "")}\n${path.resolve(String(folder || ""))}\n${String(videoName || "")}`;
+  return `autopost:${crypto.createHash("sha256").update(value).digest("hex")}`;
+}
 
 async function exists(filePath) {
   try { await fs.access(filePath); return true; } catch { return false; }
+}
+
+function statePath(accountId, folder) {
+  const key = `${String(accountId || "")}\n${path.resolve(String(folder || ""))}`;
+  const digest = crypto.createHash("sha256").update(key).digest("hex").slice(0, 24);
+  return path.join(AUTOPOST_STATE_DIR, `${digest}.json`);
+}
+
+async function readPostingState(accountId, folder) {
+  try {
+    const raw = JSON.parse(await fs.readFile(statePath(accountId, folder), "utf8"));
+    return {
+      lastPublishedName: String(raw.lastPublishedName || ""),
+      lastPublishedAt: raw.lastPublishedAt || null,
+      failedNames: Array.isArray(raw.failedNames) ? raw.failedNames.map(String).filter(Boolean) : [],
+    };
+  } catch {
+    return { lastPublishedName: "", lastPublishedAt: null, failedNames: [] };
+  }
+}
+
+async function writePostingState(accountId, folder, state) {
+  await fs.mkdir(AUTOPOST_STATE_DIR, { recursive: true });
+  await fs.writeFile(statePath(accountId, folder), JSON.stringify({
+    lastPublishedName: state.lastPublishedName || "",
+    lastPublishedAt: state.lastPublishedAt || null,
+    failedNames: [...new Set((state.failedNames || []).map(String).filter(Boolean))],
+  }, null, 2), "utf8");
 }
 
 // __ORDER_BY_UPLOAD_DATE__
@@ -130,15 +165,26 @@ function buildPlan(videos, slots) {
  *
  * options:
  *   accountId, folder, videos?, days[], times[], maxPerRun, timezone, captionTemplate
- *   worker: AutonomousWorker instance
+ *   worker: AutonomousWorker instance, deferArchive? (manual AutoPost run)
  *   onProgress({ current, total, videoName, at })
  */
-async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress } = {}) {
+async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false } = {}) {
   if (!worker) throw new Error("Falta el trabajador autonomo de TikTok.");
   const sourceDir = path.resolve(String(folder || ""));
   let files = Array.isArray(videos) && videos.length ? videos : await listVideos(sourceDir);
   if (!files.length) throw new Error("No hay videos en la carpeta elegida.");
+
+  const postingState = await readPostingState(accountId, sourceDir);
+  if (postingState.lastPublishedName) {
+    const lastIndex = files.findIndex((filePath) => path.basename(filePath) === postingState.lastPublishedName);
+    if (lastIndex >= 0) files = files.slice(lastIndex + 1);
+  }
+  if (postingState.failedNames.length) {
+    const failed = new Set(postingState.failedNames);
+    files = files.filter((filePath) => !failed.has(path.basename(filePath)));
+  }
   if (maxPerRun > 0) files = files.slice(0, maxPerRun);
+  if (!files.length) throw new Error("No hay videos nuevos pendientes de publicar en la carpeta.");
 
   const locationText = String(location || "").trim();
   const hashtagList = normalizeHashtags(hashtags);
@@ -208,24 +254,25 @@ async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRu
         nativeScheduledAt: slot.at,
         nativeTimezone: timezone2,
         caption,
-        location: locationText,
-        aiGenerated: Boolean(aiGenerated),
-        sourceFingerprint,
-        source: "autoclone-schedule",
+       location: locationText,
+       aiGenerated: Boolean(aiGenerated),
+       sourceFingerprint,
+       dedupeKey: autopostDedupeKey(accountId, sourceDir, videoName),
+       source: "autoclone-schedule",
       });
 
-      // Move the original out of the active folder so it is never uploaded
-      // twice. It is kept in a "posted" subfolder, not deleted.
-      await moveToSent(source, sentDir);
+       // For the manual AutoPost button, archive the original only after the
+       // worker reports whether TikTok accepted or rejected the upload.
+       if (!deferArchive) await moveToSent(source, sentDir);
 
-      created.push({ jobId: job.id, videoName, at: slot.at, local: slot.local, label: slot.label });
+       created.push({ jobId: job.id, videoName, sourcePath: source, at: slot.at, local: slot.local, label: slot.label });
       await onProgress?.({ current: index + 1, total: files.length, videoName, at: slot.at, label: slot.label });
     } catch (error) {
       await onProgress?.({ current: index + 1, total: files.length, videoName, error: error.message });
     }
   }
 
-  return { created, timezone: timezone2, total: files.length, location: locationText, hashtags: hashtagList, sentDir };
+  return { created, timezone: timezone2, total: files.length, location: locationText, hashtags: hashtagList, sentDir, deferArchive };
 }
 
 /**
@@ -244,25 +291,110 @@ function resolvePostedDir(sourceDir) {
   return path.join(sourceDir, "posted");
 }
 
+function resolveFailedDir(sourceDir) {
+  const parsed = path.parse(sourceDir);
+  if (parsed.base.toLowerCase() === "outputs") return path.join(parsed.dir, "failed");
+  return path.join(sourceDir, "failed");
+}
+
 /**
  * Move a video and its sidecars into the "posted" folder, avoiding overwrites.
  * A failed move is non-fatal: the upload already has its own copy in the queue.
  */
 async function moveToSent(videoPath, sentDir) {
+  await fs.mkdir(sentDir, { recursive: true });
+  const base = path.basename(videoPath);
+  const existing = path.join(sentDir, base);
+  if (!(await exists(videoPath)) && await exists(existing)) return existing;
+
+  const finalName = await uniqueName(sentDir, base);
+  const destination = path.join(sentDir, finalName);
   try {
-    await fs.mkdir(sentDir, { recursive: true });
+    await fs.rename(videoPath, destination);
+  } catch (error) {
+    // A source and destination on different volumes cannot be renamed atomically.
+    if (error.code !== "EXDEV") throw error;
+    await fs.copyFile(videoPath, destination);
+    await fs.rm(videoPath, { force: true });
+  }
+
+  const stem = path.parse(finalName).name;
+  for (const sidecar of getSidecarPaths(videoPath)) {
+    if (!(await exists(sidecar))) continue;
+    const suffix = path.basename(sidecar).slice(path.parse(videoPath).name.length);
+    const sidecarDestination = path.join(sentDir, `${stem}${suffix}`);
+    try {
+      await fs.rename(sidecar, sidecarDestination);
+    } catch (error) {
+      if (error.code !== "EXDEV") throw error;
+      await fs.copyFile(sidecar, sidecarDestination);
+      await fs.rm(sidecar, { force: true });
+    }
+  }
+  return destination;
+}
+
+async function moveToFailed(videoPath, failedDir) {
+  try {
+    await fs.mkdir(failedDir, { recursive: true });
     const base = path.basename(videoPath);
-    const finalName = await uniqueName(sentDir, base);
-    await fs.rename(videoPath, path.join(sentDir, finalName));
+    const finalName = await uniqueName(failedDir, base);
+    await fs.rename(videoPath, path.join(failedDir, finalName));
     const stem = path.parse(finalName).name;
     for (const sidecar of getSidecarPaths(videoPath)) {
       if (!(await exists(sidecar))) continue;
       const suffix = path.basename(sidecar).slice(path.parse(videoPath).name.length);
-      await fs.rename(sidecar, path.join(sentDir, `${stem}${suffix}`));
+      await fs.rename(sidecar, path.join(failedDir, `${stem}${suffix}`));
     }
+    return path.join(failedDir, finalName);
   } catch {
-    // Leave the original in place if it cannot be moved.
+    return "";
   }
+}
+
+async function waitForScheduleJobs({ created = [], worker, timeoutMs = 900_000, pollMs = 250 } = {}) {
+  const ids = created.map((item) => item.jobId).filter(Boolean);
+  const terminal = new Set(["succeeded", "failed", "uncertain", "cancelled"]);
+  const startedAt = Date.now();
+  while (ids.length && Date.now() - startedAt < timeoutMs) {
+    const jobs = await Promise.all(ids.map((id) => worker?.store?.getJob(id)));
+    if (jobs.every((job) => job && terminal.has(job.status))) return jobs;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  return Promise.all(ids.map((id) => worker?.store?.getJob(id)));
+}
+
+/** Archive manual AutoPost sources only after the real TikTok result exists. */
+async function finalizeSchedule({ accountId, folder, created, worker } = {}) {
+  const sourceDir = path.resolve(String(folder || ""));
+  const state = await readPostingState(accountId, sourceDir);
+  const sentDir = resolvePostedDir(sourceDir);
+  const failedDir = resolveFailedDir(sourceDir);
+  const result = { published: 0, failed: 0, pending: 0, sentDir, failedDir };
+
+  for (const item of created || []) {
+    const job = await worker?.store?.getJob(item.jobId);
+    if (!job || !["succeeded", "failed", "uncertain", "cancelled"].includes(job.status)) {
+      result.pending += 1;
+      continue;
+    }
+    if (job.status === "succeeded") {
+      const archivedPath = await moveToSent(item.sourcePath, sentDir);
+      state.lastPublishedName = item.videoName;
+      state.lastPublishedAt = new Date().toISOString();
+      state.failedNames = (state.failedNames || []).filter((name) => name !== item.videoName);
+      result.published += 1;
+      result.lastArchivedPath = archivedPath;
+    } else if (["failed", "uncertain"].includes(job.status)) {
+      await moveToFailed(item.sourcePath, failedDir);
+      state.failedNames = [...(state.failedNames || []), item.videoName];
+      result.failed += 1;
+    } else {
+      result.pending += 1;
+    }
+  }
+  await writePostingState(accountId, sourceDir, state);
+  return result;
 }
 
 /**
@@ -311,4 +443,22 @@ async function uniqueName(dir, desired) {
   return candidate;
 }
 
-module.exports = { listVideos, orderVideos, nextSlots, buildPlan, scheduleFolder, normalizeHashtags, appendHashtags, resolvePostedDir, moveToSent, WEEKDAYS, uniqueName };
+module.exports = {
+  listVideos,
+  orderVideos,
+  nextSlots,
+  buildPlan,
+  scheduleFolder,
+  finalizeSchedule,
+  normalizeHashtags,
+  appendHashtags,
+  resolvePostedDir,
+  resolveFailedDir,
+  moveToSent,
+  moveToFailed,
+  waitForScheduleJobs,
+  readPostingState,
+  writePostingState,
+  WEEKDAYS,
+  uniqueName,
+};

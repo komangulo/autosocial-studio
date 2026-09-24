@@ -135,6 +135,7 @@ const UI = {
     ttSoundQueryInput: document.getElementById("ttSoundQueryInput"),
     ttSoundQuerySaveBtn: document.getElementById("ttSoundQuerySaveBtn"),
     ttRandomQueueToggle: document.getElementById("ttRandomQueueToggle"),
+    ttDateQueueToggle: document.getElementById("ttDateQueueToggle"),
     igRunBtn: document.getElementById("igRunBtn"),
     igStartBtn: document.getElementById("igStartBtn"),
     igStopBtn: document.getElementById("igStopBtn"),
@@ -491,6 +492,11 @@ const UI = {
     if (this.els.ttRandomQueueToggle) {
       this.els.ttRandomQueueToggle.addEventListener("change", (e) =>
         this.handleRandomQueueToggle(e.target.checked)
+      );
+    }
+    if (this.els.ttDateQueueToggle) {
+      this.els.ttDateQueueToggle.addEventListener("change", (e) =>
+        this.handleTikTokDateQueueToggle(e.target.checked)
       );
     }
 
@@ -1288,6 +1294,22 @@ const UI = {
       toggles.forEach((toggle) => {
         toggle.checked = !enabled;
       });
+    }
+  },
+
+  async handleTikTokDateQueueToggle(enabled) {
+    const toggle = this.els.ttDateQueueToggle;
+    try {
+      const result = await API.post("/api/settings/save", {
+        payload: { TIKTOK_QUEUE_DATE_ASC: enabled },
+      });
+      if (result?.ok === false && result?.error) {
+        throw new Error(result.error);
+      }
+      this.refresh();
+    } catch (err) {
+      alert(`Could not update TikTok queue order: ${err.message}`);
+      if (toggle) toggle.checked = !enabled;
     }
   },
 
@@ -2142,6 +2164,9 @@ const UI = {
 
     if (this.els.ttRandomQueueToggle && document.activeElement !== this.els.ttRandomQueueToggle) {
       this.els.ttRandomQueueToggle.checked = Boolean(data.randomQueueOrder);
+    }
+    if (this.els.ttDateQueueToggle && document.activeElement !== this.els.ttDateQueueToggle) {
+      this.els.ttDateQueueToggle.checked = Boolean(data.tiktokQueueDateAsc);
     }
 
     const logHtml = (data.logs || [])

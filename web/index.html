@@ -263,15 +263,20 @@
           <p id="autocloneVideoHint" class="autoclone-video-hint">Si pegas una URL de vídeo aquí, se clona <b>solo ese vídeo</b> y se ignora el usuario de abajo.</p>
           <div class="autoclone-input-row">
             <input id="autocloneUsername" class="control-input autoclone-username" type="text"
-              placeholder="@usuario de TikTok  (ej. @usuario o https://www.tiktok.com/@usuario)" />
+              placeholder="@usuario de TikTok (opcional si pegas la URL marcador)" />
             <button id="autocloneStartBtn" class="control-btn primary autoclone-go" type="button">
               <i class="ph ph-lightning"></i> Clonar ahora
             </button>
             <button id="autocloneDownloadOnlyBtn" class="control-btn autoclone-go" type="button"
-              title="Descarga los videos originales sin subtitulos, sin uniquificar y sin analizar el perfil">
-              <i class="ph ph-download-simple"></i> Descargar videos originales
+              title="Descarga solo los vídeos nuevos sin publicarlos en TikTok">
+              <i class="ph ph-download-simple"></i> Descargar vídeos nuevos
             </button>
           </div>
+          <div class="autoclone-input-row">
+            <input id="autocloneLastPublishedUrl" class="control-input autoclone-video-url" type="text"
+              placeholder="URL del vídeo marcador: puedes dejar vacío el usuario y descargar solo los posteriores" />
+          </div>
+          <p class="autoclone-video-hint">Si pegas un vídeo del mismo perfil, Auto Clone descargará únicamente los vídeos publicados después de él, empezando por el más antiguo. La publicación se hace después desde TikTok AutoPost.</p>
           <div class="autoclone-destination">
             <label for="autocloneDestination">Carpeta de destino</label>
             <div class="autoclone-destination-row">
@@ -660,6 +665,15 @@
                   <div style="font-size:12px; color:var(--text-muted); font-weight:normal;">Chooses a random pending video each run instead of the first file alphabetically. Captions still stay attached to the selected video.</div>
                 </span>
               </label>
+
+              <label class="switch-container">
+                <input type="checkbox" id="ttDateQueueToggle">
+                <span class="slider"></span>
+                <span class="switch-label">
+                  <strong>Publicar TikTok de más antiguo a más reciente</strong>
+                  <div style="font-size:12px; color:var(--text-muted); font-weight:normal;">Usa la fecha YYYY-MM-DD o YYYYMMDD al principio del nombre del vídeo. Los archivos sin fecha quedan al final y esta opción tiene prioridad sobre el orden aleatorio.</div>
+                </span>
+              </label>
             </div>
 
             <div class="card full-width">
@@ -691,7 +705,8 @@
                 <div class="card-title">Auto Post desde carpeta (Auto Clone)</div>
                 <span id="apAccountBadge" class="status-badge">Sin cuenta</span>
               </div>
-              <p class="form-hint">Elige la carpeta donde Auto Clone deja los vídeos. La app los repartirá en los días y horas que elijas y los publicará sola, pulsando los botones de TikTok.</p>
+               <p class="form-hint">Este es el paso separado de publicación: elige la carpeta donde Auto Clone dejó los vídeos. AutoPost los subirá en orden del más antiguo al más reciente.</p>
+               <p class="form-hint">La cuenta y la carpeta guardan la posición del último vídeo publicado correctamente. Si uno falla, pasa a <code>failed</code> y el siguiente continúa sin perder la posición.</p>
               <p class="form-hint">Cada vídeo usa su propio texto: el <strong>título</strong>, la <strong>descripción</strong> y los <strong>hashtags</strong> que trae en su archivo <code>.meta.json</code> (se crean al descargar el perfil). Los hashtags y el texto del caption de abajo se añaden <strong>encima</strong> de los propios del vídeo.</p>
               <div class="autopost-folder">
                 <input id="apFolder" class="control-input autopost-folder-input" type="text" placeholder="Carpeta de vídeos (ej. C:\Videos\TikTok\jayandrews69)" />
@@ -1687,6 +1702,7 @@
   <script src="studio-assets/studio.js"></script>
   <script src="autoclone.js"></script>
   <script src="autopost.js"></script>
+  <script src="account-settings.js?v=2"></script>
     <script src="acct-session.js" defer></script>
     <script src="acct-radar-ui.js" defer></script>
 <!-- MARKER: LANG-EN-FIRST-v1 -->

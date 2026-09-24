@@ -4,6 +4,10 @@ const { config } = require("./config");
 
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv"]);
 const THUMBNAIL_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".avif"];
+const DATE_PREFIX_PATTERNS = [
+  /^(\d{4})-(\d{2})-(\d{2})(?=[ _.-]|$)/,
+  /^(\d{4})(\d{2})(\d{2})(?=[ _.-]|$)/,
+];
 
 // Companion metadata file written next to each downloaded video. It carries the
 // original title, description and hashtags so the publisher can reuse them.
@@ -119,6 +123,42 @@ async function readCaption(videoPath) {
   return "";
 }
 
+function queueDateTimestamp(videoPath) {
+  const name = path.basename(videoPath, path.extname(videoPath));
+  const match = DATE_PREFIX_PATTERNS.map((pattern) => pattern.exec(name)).find(Boolean);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date.getTime();
+}
+
+function compareQueueVideos(a, b) {
+  const dateA = queueDateTimestamp(a);
+  const dateB = queueDateTimestamp(b);
+  if (dateA !== null && dateB === null) return -1;
+  if (dateA === null && dateB !== null) return 1;
+  if (dateA !== null && dateB !== null && dateA !== dateB) return dateA - dateB;
+  return path.basename(a).localeCompare(path.basename(b), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function sortQueueVideos(videos) {
+  const sorted = [...videos];
+  sorted.sort(config.tiktokQueueDateAsc ? compareQueueVideos : (a, b) => a.localeCompare(b));
+  return sorted;
+}
+
 async function listQueueVideos(queueDir) {
   const dir = queueDir || config.queueDir;
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -127,15 +167,14 @@ async function listQueueVideos(queueDir) {
     .filter((entry) => VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
     .map((entry) => path.join(dir, entry.name));
 
-  videos.sort((a, b) => a.localeCompare(b));
-  return videos;
+  return sortQueueVideos(videos);
 }
 
 function pickNextVideo(videos) {
   if (videos.length === 0) {
     return null;
   }
-  if (config.randomQueueOrder) {
+  if (config.randomQueueOrder && !config.tiktokQueueDateAsc) {
     return videos[Math.floor(Math.random() * videos.length)];
   }
   return videos[0];
@@ -170,5 +209,8 @@ module.exports = {
   META_SUFFIX,
   getNextQueuedItem,
   listQueueVideos,
+  queueDateTimestamp,
+  compareQueueVideos,
+  sortQueueVideos,
   VIDEO_EXTENSIONS,
 };

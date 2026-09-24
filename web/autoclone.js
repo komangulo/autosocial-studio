@@ -10,6 +10,7 @@
     startBtn: $("autocloneStartBtn"),
     renameByDateBtn: $("autocloneRenameByDateBtn"),
     downloadOnlyBtn: $("autocloneDownloadOnlyBtn"),
+    lastPublishedUrl: $("autocloneLastPublishedUrl"),
     orderByDateBtn: $("autocloneOrderByDateBtn"),
     maxVideos: $("autocloneMaxVideos"),
     downloadOrder: $("autocloneDownloadOrder"),
@@ -59,12 +60,14 @@
   const DOWNLOAD_THUMBNAIL_KEY = "autoclone.downloadThumbnail";
   const START_MODE_KEY = "autoclone.startMode";
   const KARAOKE_KEY = "autoclone.karaoke";
+  const LAST_PUBLISHED_KEY = "autoclone.lastPublishedUrl";
 
   function loadDestination() {
     try { return localStorage.getItem(DEST_KEY) || ""; } catch { return ""; }
   }
   function saveDestination(value) {
     try { localStorage.setItem(DEST_KEY, value); } catch { /* ignore */ }
+    document.dispatchEvent(new CustomEvent("autosocial:destinationchange", { detail: { value } }));
   }
   function saveIntensity(value) {
     try { localStorage.setItem(INTENSITY_KEY, value); } catch { /* ignore */ }
@@ -76,6 +79,14 @@
     try { localStorage.setItem(DOWNLOAD_THUMBNAIL_KEY, value ? "true" : "false"); } catch { /* ignore */ }
   }
   if (els.destination) els.destination.value = loadDestination();
+  if (els.lastPublishedUrl) {
+    try { els.lastPublishedUrl.value = localStorage.getItem(LAST_PUBLISHED_KEY) || ""; } catch { /* ignore */ }
+    const saveMarker = () => {
+      try { localStorage.setItem(LAST_PUBLISHED_KEY, els.lastPublishedUrl.value.trim()); } catch { /* ignore */ }
+    };
+    els.lastPublishedUrl.addEventListener("change", saveMarker);
+    els.lastPublishedUrl.addEventListener("blur", saveMarker);
+  }
   if (els.downloadOrder) {
     try {
       const saved = localStorage.getItem(DOWNLOAD_ORDER_KEY);
@@ -125,6 +136,16 @@
 
   function setBar(percent) {
     els.barFill.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
+  }
+
+  function markerUsername() {
+    const value = (els.lastPublishedUrl?.value || "").trim();
+    const match = value.match(/https?:\/\/(?:www\.|m\.)?tiktok\.com\/@([^/?#]+)/i);
+    return match ? `@${match[1]}` : "";
+  }
+
+  function sourceUsername() {
+    return (els.username.value || "").trim() || markerUsername();
   }
 
   // XKI[indicador][poll] inicio - preguntar al backend que modelo va
@@ -265,17 +286,20 @@
     }
 
     const videos = job.videos || [];
-    const signature = videos.map((v) => `${v.id}:${v.status}:${v.translated ? 1 : 0}:${v.textBoxes || 0}:${v.error || ""}:${(v.notes || []).join(";")}`).join("|");
+    const signature = videos.map((v) => `${v.id}:${v.status}:${v.publishStatus || ""}:${v.translated ? 1 : 0}:${v.textBoxes || 0}:${v.error || ""}:${v.publishError || ""}:${(v.notes || []).join(";")}`).join("|");
     if (signature !== renderedSignature) {
       renderedSignature = signature;
       els.videos.innerHTML = videos.map((video, index) => {
-        const label = video.status === "done" ? "Listo" : video.status === "error" ? "Error" : "Pendiente";
-        const cls = video.status === "done" ? "ok" : video.status === "error" ? "err" : "wait";
+        const publishFailed = video.publishStatus === "failed";
+        const label = publishFailed ? "Fallo al publicar" : video.publishStatus === "published" ? "Publicado" : video.status === "done" ? "Listo" : video.status === "error" ? "Error" : "Pendiente";
+        const cls = publishFailed || video.status === "error" ? "err" : video.status === "done" ? "ok" : "wait";
         const tags = [];
         if (video.translated) tags.push(`texto traducido (${video.textBoxes})`);
         else if (video.status === "done") tags.push("sin texto traducible");
         if (video.karaoke) tags.push("karaoke");
-        const notes = [...(video.notes || []), video.error].filter(Boolean);
+        if (video.publishStatus === "published") tags.push("publicado en cuenta destino");
+        if (publishFailed) tags.push("guardado en failed");
+        const notes = [...(video.notes || []), video.error, video.publishError].filter(Boolean);
         // "No translatable text" is just information, not an error, so it stays
         // in a neutral tone; real failures are shown in red.
         const onlyInfo = (note) => /no se detecto texto|sin texto traducible|no se pudo traducir/i.test(note);
@@ -287,7 +311,7 @@
             ${notes.map((n) => `<span class="${onlyInfo(n) ? "autoclone-video-note" : "autoclone-video-err"}">${esc(n)}</span>`).join("")}
           </div>
           <span class="autoclone-video-status ${cls}">${label}</span>
-          ${video.status === "done" ? `<a class="control-btn-small" href="/api/autoclone/jobs/${encodeURIComponent(job.id)}/download?video=${encodeURIComponent(video.id)}" download>Descargar</a>` : ""}
+           ${video.status === "done" && !video.publishStatus ? `<a class="control-btn-small" href="/api/autoclone/jobs/${encodeURIComponent(job.id)}/download?video=${encodeURIComponent(video.id)}" download>Descargar</a>` : ""}
         </div>`;
       }).join("") || `<p class="autoclone-empty">Aún no hay vídeos en este lote.</p>`;
     }
@@ -320,31 +344,33 @@
         els.startBtn.disabled = false;
         els.cancelBtn.hidden = true;
         pollJob();
-      } else if (["download", "translate", "uniquify"].includes(progress.stage)) {
+      } else if (["download", "translate", "uniquify", "publish"].includes(progress.stage)) {
         pollJob();
       }
     };
     events.onerror = () => { /* EventSource auto-reconnects */ };
   }
 
-  // "Descargar videos originales": mismo flujo que clonar, pero sin analisis,
-  // sin traducir texto en pantalla y sin uniquificar. Solo baja los MP4 tal cual.
+  // Descargar es un paso independiente de AutoPost: solo deja los vídeos en
+  // la carpeta elegida y nunca abre TikTok para publicarlos.
   async function startDownloadOnly() {
-    const username = (els.username.value || "").trim();
-    if (!username) {
-      els.stage.textContent = "Escribe un @usuario de TikTok para descargar sus videos originales.";
+    const username = sourceUsername();
+    const markerUrl = (els.lastPublishedUrl?.value || "").trim();
+    if (!username && !markerUrl) {
+      els.stage.textContent = "Escribe un @usuario o pega la URL del vídeo marcador.";
       return;
     }
     const destinationRoot = els.destination?.value.trim() || "";
     els.downloadOnlyBtn.disabled = true;
     els.startBtn.disabled = true;
     renderedSignature = "";
-    els.videos.innerHTML = `<p class="autoclone-empty">Descargando los videos originales...</p>`;
+    els.videos.innerHTML = `<p class="autoclone-empty">Descargando los videos nuevos...</p>`;
     els.analysis.hidden = true;
     setBar(1);
     try {
       const data = await API.post("/api/autoclone/start-download", {
         username,
+        lastPublishedUrl: markerUrl,
         maxVideos: Number(els.maxVideos.value) || 0,
         downloadOrder: els.downloadOrder?.value || "oldest",
         downloadThumbnail: Boolean(els.downloadThumbnail?.checked),
@@ -357,10 +383,11 @@
       saveDownloadOrder(els.downloadOrder?.value || "oldest");
       saveDownloadThumbnail(Boolean(els.downloadThumbnail?.checked));
       saveStartMode(els.startMode?.value || "continue");
+       try { localStorage.setItem(LAST_PUBLISHED_KEY, markerUrl); } catch { /* ignore */ }
       updateDestHint(data.handle || username, destinationRoot);
-      els.stage.textContent = data.folder
-        ? `Descargando los videos originales de ${data.handle}. Guardando en ${data.folder}`
-        : `Descargando los videos originales de ${data.handle}.`;
+       els.stage.textContent = data.folder
+         ? `Descargando videos nuevos de ${data.handle}. Guardando en ${data.folder}`
+         : `Descargando videos nuevos de ${data.handle}.`;
       connectEvents();
     } catch (error) {
       els.downloadOnlyBtn.disabled = false;
@@ -445,7 +472,7 @@
   // left off" is never a mystery.
   async function refreshHistory() {
     if (!els.resetHistoryBtn) return;
-    const username = els.username.value.trim();
+    const username = sourceUsername();
     if (!username) return;
     try {
       const data = await API.get(`/api/autoclone/history?username=${encodeURIComponent(username)}`);
@@ -457,7 +484,7 @@
   }
 
   async function resetHistory() {
-    const username = els.username.value.trim();
+    const username = sourceUsername();
     if (!username) { els.stage.textContent = "Escribe un nombre de usuario de TikTok."; return; }
     if (!window.confirm(`¿Olvidar los vídeos ya descargados de ${username}? La próxima vez empezará desde el primero.`)) return;
     try {
@@ -547,6 +574,11 @@
   els.resetHistoryBtn?.addEventListener("click", resetHistory);
   els.username?.addEventListener("blur", refreshHistory);
   els.username?.addEventListener("change", refreshHistory);
+  els.lastPublishedUrl?.addEventListener("blur", () => {
+    refreshHistory();
+    updateDestHint(sourceUsername(), els.destination?.value.trim() || "");
+  });
+  els.lastPublishedUrl?.addEventListener("change", refreshHistory);
   els.destination?.addEventListener("change", () => {
     saveDestination(els.destination.value.trim());
     updateDestHint(els.username.value.trim(), els.destination.value.trim());

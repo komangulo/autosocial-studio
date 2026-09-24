@@ -181,6 +181,7 @@ const SETTINGS_ENV_KEYS = new Set([
   "DEFAULT_CAPTION",
   "DEFAULT_SOUND_QUERY",
   "RANDOM_QUEUE_ORDER",
+  "TIKTOK_QUEUE_DATE_ASC",
 ]);
 
 function serializeEnvValue(value) {
@@ -200,6 +201,8 @@ function applyRuntimeSetting(envKey, value) {
     config.defaultSoundQuery = String(value ?? "");
   } else if (envKey === "RANDOM_QUEUE_ORDER") {
     config.randomQueueOrder = String(value).toLowerCase() === "true";
+  } else if (envKey === "TIKTOK_QUEUE_DATE_ASC") {
+    config.tiktokQueueDateAsc = String(value).toLowerCase() === "true";
   }
 }
 

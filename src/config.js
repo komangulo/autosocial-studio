@@ -72,6 +72,7 @@ const config = {
   keepBrowserOnScheduleFail: getBoolean(process.env.KEEP_BROWSER_ON_SCHEDULE_FAIL, false),
   autoAddSound: getBoolean(process.env.AUTO_ADD_SOUND, false),
   randomQueueOrder: getBoolean(process.env.RANDOM_QUEUE_ORDER, false),
+  tiktokQueueDateAsc: getBoolean(process.env.TIKTOK_QUEUE_DATE_ASC, false),
   defaultSoundQuery: process.env.DEFAULT_SOUND_QUERY || "",
   defaultCaption: process.env.DEFAULT_CAPTION || "",
   uploadPageUrl:

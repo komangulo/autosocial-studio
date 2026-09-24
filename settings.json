@@ -5,7 +5,7 @@
     "xkiro": "sk-xt-99b0c95c87e19fd5750c14527f1fe242ed3bb21ee4f8224c"
   },
   "aiPreferredModel": "auto",
-  "aiChainEnabled": true,
+  "aiChainEnabled": false,
   "aiLastTest": {
     "ok": true,
     "provider": "xkiro",

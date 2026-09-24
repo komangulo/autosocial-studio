@@ -1,16 +1,5 @@
 /**
  * AutoClone router — /api/autoclone/*
- *
- *   GET    /health           -> state + settings availability
- *   GET    /progress         -> last progress snapshot
- *   GET    /events           -> SSE progress stream
- *   POST   /start            -> { username, maxVideos, uniquify, translate, downloadThumbnail, downloadOrder } -> { id }
- *   POST   /cancel           -> stop the running pipeline
- *   GET    /jobs             -> list of past/current jobs
- *   GET    /jobs/:id         -> full job detail
- *   GET    /jobs/:id/download -> download an output video
- *   POST   /schedule/preview  -> list videos + preview TikTok publication dates
- *   POST   /schedule          -> create scheduled TikTok publish jobs
  */
 
 const fs = require("fs");
@@ -36,7 +25,6 @@ function createAutoCloneRouter(express, context = {}) {
     res.json({ ok: true, running: controller.running, jobId: controller.jobId });
   }));
 
-  // Que modelo de xKiro esta trabajando ahora mismo. // XKP[xkiro-panel]
   router.get("/xkiro", route(async (req, res) => {
     try {
       const { xKiroRotateStatus } = require("./text-overlay");
@@ -46,7 +34,6 @@ function createAutoCloneRouter(express, context = {}) {
     }
   }));
 
-  // Que modelo de la cadena esta trabajando ahora mismo. // XKI[indicador][ruta]
   router.get("/modelo", route(async (req, res) => {
     try {
       const { modelActivity } = require("./text-overlay");
@@ -84,14 +71,57 @@ function createAutoCloneRouter(express, context = {}) {
   });
 
   router.post("/start", route(async (req, res) => {
-    const { username, videoUrl, maxVideos, uniquify, translate, minViews, destinationRoot, uniquifyIntensity, uniquifyOptions, metadataLanguage, downloadThumbnail, downloadOrder, startMode, karaoke } = req.body || {};
-    const result = await controller.start({ username, videoUrl, maxVideos, uniquify, translate, minViews, destinationRoot, uniquifyIntensity, uniquifyOptions, metadataLanguage, downloadThumbnail, downloadOrder, startMode, karaoke });
+    const {
+      username, videoUrl, maxVideos, uniquify, translate, minViews, destinationRoot,
+      uniquifyIntensity, uniquifyOptions, metadataLanguage, downloadThumbnail,
+      downloadOrder, startMode, karaoke, lastPublishedUrl,
+    } = req.body || {};
+    const result = await controller.start({
+      username, videoUrl, maxVideos, uniquify, translate, minViews, destinationRoot,
+      uniquifyIntensity, uniquifyOptions, metadataLanguage, downloadThumbnail,
+      downloadOrder, startMode, karaoke, lastPublishedUrl,
+    });
     res.json({ ok: true, ...result });
   }));
 
-  // Download the profile's original videos: no analysis, no subtitles, no changes.
+  // Manual incremental mode: download videos newer than the marker and publish
+  // each one to the currently selected TikTok account. No daemon is involved.
+  router.post("/start-publish", route(async (req, res) => {
+    if (!context.getActiveAccount) throw new Error("No hay cuentas de TikTok disponibles.");
+    const active = await context.getActiveAccount();
+    if (!active?.id) throw new Error("Elige una cuenta de TikTok destino en Cuentas.");
+    const {
+      username, lastPublishedUrl, maxVideos, destinationRoot, downloadThumbnail,
+      uniquify, translate, uniquifyIntensity, uniquifyOptions, metadataLanguage, karaoke,
+    } = req.body || {};
+    const result = await controller.start({
+      username,
+      maxVideos,
+      destinationRoot,
+      downloadThumbnail,
+      uniquify,
+      translate,
+      uniquifyIntensity,
+      uniquifyOptions,
+      metadataLanguage,
+      karaoke,
+      downloadOrder: "oldest",
+      startMode: "continue",
+      lastPublishedUrl,
+      publishToDestination: true,
+      publishAccountId: active.id,
+      skipAnalysis: true,
+    });
+    res.json({
+      ok: true,
+      ...result,
+      publishToDestination: true,
+      destinationAccount: { id: active.id, name: active.name || active.username || active.id },
+    });
+  }));
+
   router.post("/start-download", route(async (req, res) => {
-    const { username, videoUrl, maxVideos, destinationRoot, downloadThumbnail, downloadOrder, startMode } = req.body || {};
+    const { username, videoUrl, maxVideos, destinationRoot, downloadThumbnail, downloadOrder, startMode, lastPublishedUrl } = req.body || {};
     const result = await controller.start({
       username,
       videoUrl,
@@ -100,44 +130,38 @@ function createAutoCloneRouter(express, context = {}) {
       downloadThumbnail,
       downloadOrder,
       startMode,
+      lastPublishedUrl,
       downloadOnly: true,
     });
     res.json({ ok: true, ...result, downloadOnly: true });
   }));
 
-  // Which videos of a profile were already downloaded by previous runs.
   router.get("/history", route(async (req, res) => {
     const handle = String(req.query.username || "");
     if (!handle.trim()) throw new Error("Escribe un nombre de usuario de TikTok.");
     res.json({ ok: true, ...(await controller.getHistory(handle)) });
   }));
 
-  // Forget one profile's download memory so the next run starts from the first video.
   router.post("/history/reset", route(async (req, res) => {
     const { username } = req.body || {};
     res.json({ ok: true, ...(await controller.resetHistory(username)) });
   }));
 
-  // Renombrar los videos de una carpeta con la fecha delante (YYYY-MM-DD_id).
   router.post("/rename-by-date", route(async (req, res) => {
     const { folder } = req.body || {};
     if (!folder) throw new Error("Elige la carpeta de los videos.");
-    const result = await controller.renameFolderWithDates(folder);
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, ...(await controller.renameFolderWithDates(folder)) });
   }));
 
-  // Reordenar una carpeta de videos por la fecha real de publicacion.
   router.post("/order-by-date", route(async (req, res) => {
     const { folder } = req.body || {};
     if (!folder) throw new Error("Elige la carpeta de los videos.");
-    const result = await controller.orderFolderByDate(folder);
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, ...(await controller.orderFolderByDate(folder)) });
   }));
 
   router.post("/destination/check", route(async (req, res) => {
     const { destinationRoot, username } = req.body || {};
-    const check = await controller.checkDestination(destinationRoot, username);
-    res.json({ ok: true, ...check });
+    res.json({ ok: true, ...(await controller.checkDestination(destinationRoot, username)) });
   }));
 
   router.post("/cancel", route(async (req, res) => {
@@ -174,8 +198,6 @@ function createAutoCloneRouter(express, context = {}) {
     fs.createReadStream(video.outputPath).on("error", () => res.destroy()).pipe(res);
   }));
 
-  // ------------------------------------------------- Auto Post (TikTok)
-
   router.post("/schedule/list", route(async (req, res) => {
     const { folder } = req.body || {};
     if (!folder) throw new Error("Elige la carpeta de salida de los videos.");
@@ -189,18 +211,11 @@ function createAutoCloneRouter(express, context = {}) {
       items.push({
         name: path.basename(videoPath),
         hasMeta: Boolean(meta),
-        // META-DESC-ONLY-LIST: TikTok no tiene titulo; mostramos la descripcion.
         title: meta?.description || "",
         description: meta?.description || "",
       });
     }
-    res.json({
-      ok: true,
-      folder: path.resolve(folder),
-      videos: items.map((item) => item.name),
-      items,
-      withMeta,
-    });
+    res.json({ ok: true, folder: path.resolve(folder), videos: items.map((item) => item.name), items, withMeta });
   }));
 
   router.post("/schedule/preview", route(async (req, res) => {
@@ -249,16 +264,10 @@ function createAutoCloneRouter(express, context = {}) {
     res.json({ ok: true, lastSchedule, startRun });
   }));
 
-  // Expose the schedule debug log and diagnostic screenshots so they can be
-  // read from the dashboard without hunting for files.
   router.get("/schedule/log", route(async (req, res) => {
     const logPath = path.resolve(process.cwd(), "schedule-debug.log");
     let log = "";
-    try {
-      log = await fs.promises.readFile(logPath, "utf8");
-    } catch {
-      log = "";
-    }
+    try { log = await fs.promises.readFile(logPath, "utf8"); } catch { log = ""; }
     res.json({ ok: true, path: logPath, log });
   }));
 
@@ -283,11 +292,6 @@ function createAutoCloneRouter(express, context = {}) {
     fs.createReadStream(filePath).on("error", () => res.status(404).end()).pipe(res);
   }));
 
-  /**
-   * One-click: create the jobs AND immediately upload every video to TikTok,
-   * leaving each one scheduled with its native "Schedule" date/time. The
-   * computer does not need to stay on afterwards.
-   */
   router.post("/schedule/start", route(async (req, res) => {
     const { folder, days, times, maxPerRun, timezone, captionTemplate, hashtags, location, aiGenerated } = req.body || {};
     if (!context.getActiveAccount || !context.worker) throw new Error("El programador de TikTok no esta disponible.");
@@ -295,23 +299,12 @@ function createAutoCloneRouter(express, context = {}) {
     const active = await context.getActiveAccount();
     if (!active?.id) throw new Error("Elige una cuenta de TikTok en Cuentas.");
 
-    // Explicit action: clear any previous Stop and make sure the worker runs.
     context.worker.clearCancellation?.();
     context.worker.start?.({ force: true });
-
     startRun = {
-      running: true,
-      startedAt: new Date().toISOString(),
-      accountId: active.id,
-      current: 0,
-      total: 0,
-      done: 0,
-      failed: 0,
-      lastVideoName: null,
-      lastScheduledAt: null,
-      error: null,
-      cancelled: false,
-      finishedAt: null,
+      running: true, startedAt: new Date().toISOString(), accountId: active.id,
+         current: 0, total: 0, done: 0, failed: 0, lastVideoName: null,
+       lastScheduledAt: null, sentDir: null, failedDir: null, error: null, cancelled: false, finishedAt: null,
     };
 
     const run = startRun;
@@ -327,9 +320,10 @@ function createAutoCloneRouter(express, context = {}) {
           captionTemplate,
           hashtags,
           location,
-          aiGenerated,
-          worker: context.worker,
-          onProgress: (progress) => {
+           aiGenerated,
+           worker: context.worker,
+           deferArchive: true,
+           onProgress: (progress) => {
             run.current = progress.current || run.current;
             run.total = progress.total || run.total;
             if (progress.videoName) run.lastVideoName = progress.videoName;
@@ -341,24 +335,31 @@ function createAutoCloneRouter(express, context = {}) {
         run.total = result.total || run.total;
         run.done = result.created.length;
         if (!context.worker.isCancelled?.()) {
-          // El drain devuelve el resumen REAL: cuantos se publicaron y cuantos
-          // fallaron. Antes run.done era "cuantos se crearon" y el mensaje final
-          // decia "N programados" aunque la subida hubiera fallado.
-          const drainSummary = await context.worker.drainTikTokQueue({
+          await context.worker.drainTikTokQueue({
             onJob: (job) => {
               run.lastVideoName = job.payload?.videoName || run.lastVideoName;
               run.lastScheduledAt = job.payload?.nativeScheduledAt || run.lastScheduledAt;
             },
           });
-          if (drainSummary && typeof drainSummary === "object") {
-            if (Number.isFinite(drainSummary.published)) {
-              run.published = drainSummary.published;
-            }
-            if (Number.isFinite(drainSummary.failed)) {
-              run.failed = (run.failed || 0) + drainSummary.failed;
-            }
-          }
         }
+        if (!context.worker.isCancelled?.()) {
+          await scheduler.waitForScheduleJobs({
+            created: result.created,
+            worker: context.worker,
+          });
+        }
+        const finalized = await scheduler.finalizeSchedule({
+          accountId: active.id,
+          folder,
+          created: result.created,
+          worker: context.worker,
+        });
+        run.published = finalized.published;
+        run.failed = (run.failed || 0) + finalized.failed;
+        run.pending = finalized.pending;
+        run.sentDir = finalized.sentDir;
+        run.failedDir = finalized.failedDir;
+        run.lastArchivedPath = finalized.lastArchivedPath || null;
         run.cancelled = Boolean(context.worker.isCancelled?.());
         run.running = false;
         run.finishedAt = new Date().toISOString();
@@ -372,10 +373,6 @@ function createAutoCloneRouter(express, context = {}) {
     res.json({ ok: true, started: true, accountId: active.id, run });
   }));
 
-  /**
-   * Stop the running "schedule everything now" batch. Cancels the worker drain
-   * loop AND persists the pause, so reopening the app does not resume it.
-   */
   router.post("/schedule/stop", route(async (req, res) => {
     if (!context.worker) throw new Error("El programador de TikTok no esta disponible.");
     context.worker.stop();

@@ -3284,8 +3284,13 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
   try {
     await onPhase?.("browser-started");
     await gotoUploadPage(page);
+    // TikTok can show a blocking first-use notice before the upload editor.
+    // Dismiss its exact "Got it" action before touching the file input.
+    await dismissInterferingOverlays(page);
     await setVideoFile(page, absoluteVideoPath);
     await waitForUploadReady(page);
+    // The notice can render slightly after the upload page becomes visible.
+    await dismissInterferingOverlays(page);
     if (coverPath) {
       await onPhase?.("cover-setting");
       await setTikTokCover(page, coverPath);

@@ -22,11 +22,104 @@ const JOBS_DIR = path.join(ROOT, "jobs");
 // Per-profile download memory: which video ids were already downloaded, so a
 // later run can continue where the previous one stopped instead of repeating.
 const HISTORY_DIR = path.join(ROOT, "history");
+// Publication memory is separate from download memory. The next manual run
+// must advance only after TikTok accepted a video, not merely after yt-dlp saved it.
+const PUBLICATION_STATE_DIR = path.join(ROOT, "publication-state");
 const textOverlay = require("./text-overlay");
-const { writeMetaFromInfoJson } = require("../video-meta");
+const { writeMetaFromInfoJson, infoJsonPathFor } = require("../video-meta");
 const { ytDlpCommand } = require("../yt-dlp");
 
 function nowIso() { return new Date().toISOString(); }
+
+function ytDlpDiagnostic(error) {
+  const raw = String(error?.stderr || "").trim();
+  const fallback = String(error?.message || "").trim();
+  const text = raw || fallback || "yt-dlp no devolvio detalles.";
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const summary = lines
+    .filter((line) => /ERROR|Unable|not available|Sign in|ffmpeg|permission|access/i.test(line))
+    .pop() || lines[lines.length - 1] || text;
+  return { text, summary };
+}
+
+function timestampFromVideoId(id) {
+  try {
+    const seconds = Number(BigInt(String(id || "")) >> 32n);
+    const now = Math.floor(Date.now() / 1000);
+    if (Number.isSafeInteger(seconds) && seconds >= 946684800 && seconds <= now + 86400) return seconds;
+  } catch { /* Some playlist ids are not numeric. */ }
+  return null;
+}
+
+function parsePlaylistEntries(stdout) {
+  return String(stdout || "")
+    .split(/\r?\n/)
+    .map((line, position) => {
+      const [idRaw, timestampRaw, uploadDateRaw] = line.trim().split("\t");
+      const id = String(idRaw || "").trim();
+      const timestampNumber = Number(timestampRaw);
+      const uploadDate = String(uploadDateRaw || "").trim();
+      const timestamp = Number.isFinite(timestampNumber) && timestampNumber > 0
+        ? timestampNumber
+        : timestampFromVideoId(id);
+      return {
+        id,
+        position,
+        timestamp,
+        uploadDate: /^\d{8}$/.test(uploadDate) ? uploadDate : "",
+      };
+    })
+    .filter((entry) => entry.id);
+}
+
+function comparePlaylistEntries(a, b, order = "oldest", newestFirstFallback = false) {
+  let comparison = 0;
+  if (a.timestamp !== null && b.timestamp !== null && a.timestamp !== b.timestamp) {
+    comparison = a.timestamp - b.timestamp;
+  } else if (a.uploadDate && b.uploadDate && a.uploadDate !== b.uploadDate) {
+    comparison = a.uploadDate.localeCompare(b.uploadDate);
+  } else if (newestFirstFallback) {
+    comparison = b.position - a.position;
+  } else {
+    comparison = a.position - b.position;
+  }
+  return order === "recent" ? -comparison : comparison;
+}
+
+function sortPlaylistEntries(entries, order, newestFirstFallback = false) {
+  return [...entries].sort((a, b) => comparePlaylistEntries(a, b, order, newestFirstFallback));
+}
+
+function uploadedAtForEntry(entry) {
+  if (entry?.timestamp !== null && Number.isFinite(entry?.timestamp)) {
+    return new Date(entry.timestamp * 1000).toISOString();
+  }
+  if (/^\d{8}$/.test(String(entry?.uploadDate || ""))) {
+    const date = entry.uploadDate;
+    return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T00:00:00.000Z`;
+  }
+  return "";
+}
+
+function entryIsNewerThanMarker(entry, marker, markerInListing = false) {
+  if (!entry || !marker || entry.id === marker.id) return false;
+  if (entry.timestamp !== null && marker.timestamp !== null) {
+    if (entry.timestamp !== marker.timestamp) return entry.timestamp > marker.timestamp;
+    // TikTok timestamps have second precision. When two videos share a second,
+    // the profile listing order is the only available tie-breaker.
+    return markerInListing
+      && Number.isInteger(entry.position)
+      && Number.isInteger(marker.position)
+      && entry.position < marker.position;
+  }
+  if (entry.uploadDate && marker.uploadDate) return entry.uploadDate > marker.uploadDate;
+  // TikTok normally returns profile playlists newest-first. This fallback is
+  // only used when yt-dlp cannot expose a precise timestamp.
+  if (markerInListing && Number.isInteger(entry.position) && Number.isInteger(marker.position)) {
+    return entry.position < marker.position;
+  }
+  return false;
+}
 
 function safeId(value) {
   return String(value || "").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || `job-${Date.now()}`;
@@ -165,6 +258,35 @@ async function writeHistory(handle, downloadedIds) {
     handle: normalizeHandle(handle),
     downloadedIds: [...new Set(downloadedIds.map((id) => String(id)).filter(Boolean))],
     updatedAt: nowIso(),
+  });
+}
+
+function publicationStatePath(handle) {
+  const clean = String(handle || "").replace(/^@/, "").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 80) || "unknown";
+  return path.join(PUBLICATION_STATE_DIR, `${clean}.json`);
+}
+
+async function readPublicationState(handle) {
+  const raw = await readJson(publicationStatePath(handle), {});
+  return {
+    handle: normalizeHandle(handle),
+    baseMarkerId: String(raw.baseMarkerId || ""),
+    baseMarkerUrl: String(raw.baseMarkerUrl || ""),
+    lastPublishedId: String(raw.lastPublishedId || ""),
+    lastPublishedUrl: String(raw.lastPublishedUrl || ""),
+    lastPublishedTimestamp: Number.isFinite(Number(raw.lastPublishedTimestamp))
+      ? Number(raw.lastPublishedTimestamp)
+      : null,
+    lastPublishedAt: raw.lastPublishedAt || null,
+    failedIds: Array.isArray(raw.failedIds) ? raw.failedIds.map(String).filter(Boolean) : [],
+  };
+}
+
+async function writePublicationState(handle, state) {
+  await writeJson(publicationStatePath(handle), {
+    ...state,
+    handle: normalizeHandle(handle),
+    failedIds: [...new Set((state.failedIds || []).map(String).filter(Boolean))],
   });
 }
 
@@ -453,6 +575,7 @@ class AutoCloneController extends EventEmitter {
     const target = normalizeHandle(handle);
     if (!target) throw new Error("Escribe un nombre de usuario de TikTok.");
     await fs.rm(historyPath(target), { force: true }).catch(() => {});
+    await fs.rm(publicationStatePath(target), { force: true }).catch(() => {});
     return { ok: true, handle: target, count: 0 };
   }
 
@@ -576,7 +699,7 @@ class AutoCloneController extends EventEmitter {
 
   /**
    * Kick off the pipeline. Returns immediately; progress arrives over SSE.
-   * options: { username, maxVideos, uniquify, translate, minViews, destinationRoot, downloadThumbnail, downloadOrder }
+    * options: { username, maxVideos, uniquify, translate, minViews, destinationRoot, downloadThumbnail, downloadOrder, lastPublishedUrl, publishToDestination, publishAccountId }
    */
   async start(options = {}) {
     if (this.running) throw new Error("Ya hay una ejecucion en curso. Espera a que termine.");
@@ -587,10 +710,34 @@ class AutoCloneController extends EventEmitter {
       throw new Error("La URL del video no es valida. Pega un enlace de TikTok del tipo https://www.tiktok.com/@usuario/video/123...");
     }
 
+    const markerUrl = String(options.lastPublishedUrl || "").trim();
+    const marker = markerUrl ? parseVideoUrl(markerUrl) : null;
     const handle = video && video.username
       ? video.username
-      : normalizeHandle(options.username);
-    if (!video && !handle) throw new Error("Escribe un nombre de usuario de TikTok o la URL de un video.");
+      : normalizeHandle(options.username || marker?.username);
+    if (!video && !handle) {
+      if (markerUrl) throw new Error("La URL del video marcador no es valida. Usa el enlace completo de TikTok.");
+      throw new Error("Escribe un nombre de usuario de TikTok o pega la URL de un video.");
+    }
+
+    if (markerUrl) {
+      if (video) throw new Error("El marcador necesita un perfil de origen, no una URL de video individual.");
+      if (!marker?.id || !marker.username) {
+        throw new Error("La URL del video marcador no es valida. Usa el enlace completo de TikTok.");
+      }
+      if (normalizeHandle(marker.username).toLowerCase() !== handle.toLowerCase()) {
+        throw new Error("El video marcador debe pertenecer al mismo perfil de origen.");
+      }
+    }
+    if (options.publishToDestination) {
+      if (video) throw new Error("El modo descargar y publicar necesita un perfil de origen, no una URL de video individual.");
+      if (!markerUrl) {
+        throw new Error("Pega la URL completa del ultimo video ya publicado para usarlo como marcador.");
+      }
+      if (!String(options.publishAccountId || "").trim()) {
+        throw new Error("No hay una cuenta destino de TikTok seleccionada.");
+      }
+    }
 
     const destinationRoot = String(options.destinationRoot || "").trim();
     if (destinationRoot) {
@@ -626,6 +773,10 @@ class AutoCloneController extends EventEmitter {
         startMode: options.startMode === "restart" ? "restart" : "continue",
         // __ORIGINAL_DOWNLOAD_MODE__ Solo descarga: ni analisis, ni subtitulos, ni uniquify.
         downloadOnly: options.downloadOnly === true,
+        lastPublishedUrl: String(options.lastPublishedUrl || "").trim(),
+        publishToDestination: options.publishToDestination === true,
+        publishAccountId: String(options.publishAccountId || "").trim(),
+        skipAnalysis: options.skipAnalysis === true,
         karaoke: options.karaoke === true,
         destinationRoot: destinationRoot ? path.resolve(destinationRoot) : "",
       },
@@ -667,7 +818,15 @@ class AutoCloneController extends EventEmitter {
         this._report("download", "Modo solo descarga: bajando los videos originales sin modificar.", { percent: 5 });
         const originals = await this._downloadAll(job, ai);
         if (this.cancelRequested) throw new Error("Ejecucion cancelada.");
-        if (!originals.length) throw new Error("No se pudo descargar ningun video del perfil.");
+        if (!originals.length) {
+          if (!job.options.lastPublishedUrl) throw new Error("No se pudo descargar ningun video del perfil.");
+          job.status = "done";
+          job.finishedAt = nowIso();
+          job.folder = this._userDir(job);
+          await this._saveJob(job);
+          this._report("done", `No hay videos nuevos posteriores al marcador.`, { percent: 100, jobId: job.id, folder: job.folder });
+          return;
+        }
 
         // __DATE_PREFIX_IN_DOWNLOAD_ONLY__ El renombrado ya ocurre en _downloadAll.
         job.status = "done";
@@ -684,7 +843,9 @@ class AutoCloneController extends EventEmitter {
       }
 
       // 1) Competitor analysis -------------------------------------------
-      if (job.singleVideo) {
+      if (job.options.skipAnalysis) {
+        this._report("analysis", "Modo manual: se omite el analisis automatico del perfil.", { percent: 12 });
+      } else if (job.singleVideo) {
         // A single video has no profile to analyse; skip straight to download.
         this._report("analysis", "Video suelto: se omite el analisis del perfil.", { percent: 12 });
       } else {
@@ -716,7 +877,15 @@ class AutoCloneController extends EventEmitter {
       this._report("download", job.singleVideo ? "Descargando el video indicado..." : "Descargando los videos del perfil...", { percent: 15 });
       const downloaded = await this._downloadAll(job, ai);
       if (this.cancelRequested) throw new Error("Ejecucion cancelada.");
-      if (!downloaded.length) throw new Error("No se pudo descargar ningun video del perfil.");
+      if (!downloaded.length) {
+        if (!job.options.lastPublishedUrl) throw new Error("No se pudo descargar ningun video del perfil.");
+        job.status = "done";
+        job.finishedAt = nowIso();
+        job.folder = this._userDir(job);
+        await this._saveJob(job);
+        this._report("done", `No hay videos nuevos posteriores al marcador.`, { percent: 100, jobId: job.id, folder: job.folder });
+        return;
+      }
       this._report("download", `${downloaded.length} videos descargados.`, { percent: 45 });
 
       // 3) Per video: translate overlay + uniquify -----------------------
@@ -735,7 +904,12 @@ class AutoCloneController extends EventEmitter {
               videoTotal: downloaded.length,
             }),
           });
-          Object.assign(video, result, { status: "done" });
+           Object.assign(video, result, { status: "done" });
+           if (job.options.publishToDestination) {
+             const publication = await this._publishOutput(job, video);
+             Object.assign(video, publication);
+             await this._recordPublication(job, video, publication.publishStatus);
+           }
         } catch (error) {
           video.status = "error";
           video.error = error.message;
@@ -748,7 +922,13 @@ class AutoCloneController extends EventEmitter {
       job.finishedAt = nowIso();
       job.folder = this._userDir(job);
       await this._saveJob(job);
-      this._report("done", `Pipeline completado: ${job.videos.filter((v) => v.status === "done").length} de ${job.videos.length} videos. Guardados en ${job.folder}`, {
+      const processedCount = job.videos.filter((v) => v.status === "done").length;
+      const publishedCount = job.videos.filter((v) => v.publishStatus === "published").length;
+      const publishFailedCount = job.videos.filter((v) => v.publishStatus === "failed").length;
+      const publishSummary = job.options.publishToDestination
+        ? ` Publicados: ${publishedCount}; fallidos: ${publishFailedCount}.`
+        : "";
+      this._report("done", `Pipeline completado: ${processedCount} de ${job.videos.length} videos.${publishSummary} Guardados en ${job.folder}`, {
         percent: 100, jobId: job.id, folder: job.folder,
       });
     } catch (error) {
@@ -846,33 +1026,120 @@ class AutoCloneController extends EventEmitter {
     const history = startMode === "restart"
       ? { downloadedIds: [] }
       : await readHistory(job.handle);
+    const publicationState = job.options.publishToDestination
+      ? await readPublicationState(job.handle)
+      : null;
     job.historyCount = history.downloadedIds.length;
 
     const cookieArgs = await this._cookieArgs();
-    const listArgs = ["--no-warnings", ...cookieArgs, "--flat-playlist", "--print", "%(id)s"]; // CK[list]
-    if (job.options.downloadOrder === "oldest") listArgs.push("--playlist-reverse");
-    listArgs.push(job.url);
+    const listArgs = [
+      "--no-warnings", ...cookieArgs, "--flat-playlist", "--skip-download",
+      "--print", "%(id)s\t%(timestamp)s\t%(upload_date)s",
+      job.url,
+    ];
 
-    let ids = [];
+    let entries = [];
     try {
       const { stdout } = await run(ytDlp, listArgs, { timeout: 300_000 });
-      ids = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+      entries = parsePlaylistEntries(stdout);
     } catch (error) {
-      throw new Error(`No se pudo listar el perfil con yt-dlp: ${error.message}`);
+      const diagnostic = ytDlpDiagnostic(error);
+      throw new Error(`No se pudo listar el perfil con yt-dlp: ${diagnostic.summary}`);
     }
-    if (!ids.length) throw new Error("El perfil no devolvio videos (puede ser privado o no existir).");
+    if (!entries.length) throw new Error("El perfil no devolvio videos (puede ser privado o no existir).");
+
+    const requestedMarker = job.options.lastPublishedUrl
+      ? parseVideoUrl(job.options.lastPublishedUrl)
+      : null;
+    let stateForRun = publicationState;
+    if (stateForRun) {
+      const knownMarkerIds = new Set([stateForRun.baseMarkerId, stateForRun.lastPublishedId].filter(Boolean));
+      const userChangedMarker = requestedMarker?.id && knownMarkerIds.size && !knownMarkerIds.has(requestedMarker.id);
+      if (userChangedMarker) {
+        stateForRun = {
+          handle: job.handle,
+          baseMarkerId: requestedMarker.id,
+          baseMarkerUrl: requestedMarker.url,
+          lastPublishedId: "",
+          lastPublishedUrl: "",
+          lastPublishedTimestamp: null,
+          lastPublishedAt: null,
+          failedIds: [],
+        };
+      } else if (!stateForRun.baseMarkerId && requestedMarker?.id) {
+        stateForRun.baseMarkerId = requestedMarker.id;
+        stateForRun.baseMarkerUrl = requestedMarker.url;
+      }
+    }
+    const markerId = stateForRun?.lastPublishedId || requestedMarker?.id || "";
+    const markerUrl = stateForRun?.lastPublishedUrl || requestedMarker?.url || "";
+    let markerEntry = null;
+    let markerInListing = false;
+    if (markerId || markerUrl) {
+      markerEntry = entries.find((entry) => entry.id === markerId) || null;
+      markerInListing = Boolean(markerEntry);
+      if (!markerEntry && stateForRun?.lastPublishedTimestamp !== null) {
+        markerEntry = {
+          id: markerId,
+          position: -1,
+          timestamp: stateForRun.lastPublishedTimestamp,
+          uploadDate: "",
+        };
+      }
+      if (!markerEntry) {
+        try {
+          const { stdout } = await run(ytDlp, [
+            "--no-warnings", ...cookieArgs, "--skip-download", "--print",
+            "%(id)s\t%(timestamp)s\t%(upload_date)s", markerUrl,
+          ], { timeout: 180_000 });
+          markerEntry = parsePlaylistEntries(stdout).find((entry) => entry.id === markerId) || null;
+        } catch (error) {
+          const diagnostic = ytDlpDiagnostic(error);
+          throw new Error(`No se pudo leer la fecha del video marcador: ${diagnostic.summary}`);
+        }
+      }
+      if (!markerEntry) {
+        throw new Error("No se pudo leer el video marcador. Comprueba que la URL sea publica y completa.");
+      }
+    }
+
+    const orderedEntries = sortPlaylistEntries(
+      entries,
+      markerEntry ? "oldest" : (job.options.downloadOrder === "recent" ? "recent" : "oldest"),
+      true,
+    );
+    const candidateEntries = markerEntry
+      ? orderedEntries.filter((entry) => entryIsNewerThanMarker(entry, markerEntry, markerInListing))
+      : orderedEntries;
+    const ids = candidateEntries.map((entry) => entry.id);
 
     // Continue where the previous run stopped: skip the ids already downloaded
-    // and take the next `max` in the chosen chronological order.
-    const selected = selectNextBatch(ids, history.downloadedIds, max);
+    // and take the oldest new videos first. In publication mode, the persistent
+    // publication marker is authoritative; only known failed ids are skipped.
+    const rememberedIds = job.options.publishToDestination
+      ? (stateForRun?.failedIds || [])
+      : history.downloadedIds;
+    job.publicationState = stateForRun;
+    const rememberedSet = new Set(rememberedIds);
+    const skippedByHistory = ids.filter((id) => rememberedSet.has(id));
+    const selected = selectNextBatch(ids, rememberedIds, max);
+    job.skippedByHistory = skippedByHistory.length;
+    job.selectedVideoIds = selected;
     if (!selected.length) {
-      this._report("download", `No hay videos nuevos en ${job.handle}: ya se descargaron todos (${ids.length}).`, { percent: 45 });
+      this._report("download", markerEntry
+        ? `No hay videos posteriores pendientes al marcador en ${job.handle}. Ya descargados: ${skippedByHistory.length}.`
+        : `No hay videos nuevos en ${job.handle}: ya se descargaron todos (${ids.length}).`, { percent: 45 });
     } else {
-      this._report("download", `Descargando ${selected.length} de ${ids.length} videos (${history.downloadedIds.length} ya descargados)...`, { percent: 15 });
+      this._report("download", markerEntry
+        ? `Marcador ${markerEntry.id}. Omitidos por historial: ${skippedByHistory.length}. Primer pendiente: ${selected[0]}. Descargando ${selected.length} videos de ${job.handle}, del mas antiguo al mas reciente...`
+        : `Descargando ${selected.length} de ${ids.length} videos (${history.downloadedIds.length} ya descargados)...`, { percent: 15 });
     }
-    job.historyTotal = ids.length;
+    job.historyTotal = entries.length;
+    job.markerVideoId = markerEntry?.id || null;
+    job.availableNewVideos = candidateEntries.length;
 
     const videos = [];
+    const entryById = new Map(candidateEntries.map((entry) => [entry.id, entry]));
     for (let index = 0; index < selected.length; index += 1) {
       if (this.cancelRequested) break;
       const id = selected[index];
@@ -913,7 +1180,17 @@ class AutoCloneController extends EventEmitter {
         await this._stampUploadedAt(target, infoJsonPathFor(target)); // __ORDER_BY_UPLOAD_DATE__
         target = await this._renameWithDatePrefix(target); // __DATE_PREFIX_FILENAMES__
         const finalStat = await fs.stat(target).catch(() => null);
-        videos.push({ id, sourcePath: target, sizeBytes: finalStat?.size || stat.size, status: "pending", downloadIndex: index, hasThumbnail: Boolean(thumbnailPath) });
+        const sourceEntry = entryById.get(id);
+        videos.push({
+          id,
+          sourcePath: target,
+          sizeBytes: finalStat?.size || stat.size,
+          status: "pending",
+          downloadIndex: index,
+          uploadedAt: uploadedAtForEntry(sourceEntry),
+          sourceTimestamp: sourceEntry?.timestamp ?? null,
+          hasThumbnail: Boolean(thumbnailPath),
+        });
       } catch (error) {
         this._report("download-warning", `No se pudo descargar el video ${id}: ${error.message}`, {});
       }
@@ -926,6 +1203,86 @@ class AutoCloneController extends EventEmitter {
     await writeHistory(job.handle, [...alreadyDownloaded, ...selected]).catch(() => {});
     await this._saveJob(job);
     return videos;
+  }
+
+  async _recordPublication(job, video, status) {
+    if (!job.options.publishToDestination) return;
+    const state = job.publicationState || await readPublicationState(job.handle);
+    if (!state.baseMarkerId && job.options.lastPublishedUrl) {
+      const initial = parseVideoUrl(job.options.lastPublishedUrl);
+      if (initial?.id) {
+        state.baseMarkerId = initial.id;
+        state.baseMarkerUrl = initial.url;
+      }
+    }
+    if (status === "published") {
+      state.lastPublishedId = video.id;
+      state.lastPublishedUrl = `https://www.tiktok.com/${job.handle}/video/${video.id}`;
+      state.lastPublishedTimestamp = Number.isFinite(video.sourceTimestamp) ? video.sourceTimestamp : null;
+      state.lastPublishedAt = nowIso();
+      state.failedIds = (state.failedIds || []).filter((id) => id !== video.id);
+    } else if (status === "failed") {
+      state.failedIds = [...(state.failedIds || []), video.id];
+    }
+    job.publicationState = state;
+    job.lastPublishedId = state.lastPublishedId || null;
+    job.lastPublishedUrl = state.lastPublishedUrl || null;
+    job.failedPublicationIds = state.failedIds;
+    await writePublicationState(job.handle, state).catch(() => {});
+  }
+
+  /** Publish one finished video to the currently selected destination account. */
+  async _publishOutput(job, video) {
+    const accountId = String(job.options.publishAccountId || "").trim();
+    if (!accountId) {
+      return { publishStatus: "failed", publishError: "No hay una cuenta destino de TikTok seleccionada." };
+    }
+
+    const { getAccountQueueDirs } = require("../account-manager");
+    const { readVideoMeta, getSidecarPaths } = require("../queue");
+    const { postSingleVideo } = require("../post-service");
+    const dirs = getAccountQueueDirs(accountId).tiktok;
+    const meta = await readVideoMeta(video.outputPath).catch(() => null);
+    const caption = meta?.caption || meta?.description || "";
+    this._report("publish", `Publicando el video ${video.id} en la cuenta destino...`, {});
+
+    try {
+      const result = await postSingleVideo({
+        videoPath: video.outputPath,
+        caption,
+        source: "autoclone-manual",
+        postedDir: dirs.posted,
+        failedDir: dirs.failed,
+        accountId,
+      });
+      if (result.ok) {
+        return {
+          publishStatus: "published",
+          publishedPath: result.movedVideo || "",
+        };
+      }
+      return {
+        publishStatus: "failed",
+        publishError: result.error || "TikTok no acepto el video.",
+        failedPath: result.movedVideo || "",
+      };
+    } catch (error) {
+      // uploadVideo can throw before post-service gets a chance to archive the
+      // file. Keep the failed video recoverable in the destination account's
+      // failed folder and let the batch continue with the next one.
+      await fs.mkdir(dirs.failed, { recursive: true }).catch(() => {});
+      const failedPath = path.join(dirs.failed, path.basename(video.outputPath));
+      try {
+        await fs.rename(video.outputPath, failedPath);
+        for (const sidecar of getSidecarPaths(video.outputPath)) {
+          const sidecarTarget = path.join(dirs.failed, path.basename(sidecar));
+          await fs.rename(sidecar, sidecarTarget).catch(() => {});
+        }
+      } catch {
+        // The original path is still visible in the job if archiving fails.
+      }
+      return { publishStatus: "failed", publishError: error.message, failedPath };
+    }
   }
 
   /** Translate on-screen text, burn it, then uniquify the result. */
@@ -1150,4 +1507,22 @@ function getAutoCloneController() {
   return instance;
 }
 
-module.exports = { AutoCloneController, getAutoCloneController, ROOT, HISTORY_DIR, normalizeHandle, parseVideoUrl, writeJson, selectNextBatch, readHistory, writeHistory, historyPath };
+module.exports = {
+  AutoCloneController,
+  getAutoCloneController,
+  ROOT,
+  HISTORY_DIR,
+  PUBLICATION_STATE_DIR,
+  normalizeHandle,
+  parseVideoUrl,
+  parsePlaylistEntries,
+  sortPlaylistEntries,
+  entryIsNewerThanMarker,
+  readPublicationState,
+  writePublicationState,
+  writeJson,
+  selectNextBatch,
+  readHistory,
+  writeHistory,
+  historyPath,
+};

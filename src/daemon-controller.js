@@ -4,6 +4,7 @@ const path = require("path");
 const cron = require("node-cron");
 const { config } = require("./config");
 const { postNextFromQueue } = require("./post-service");
+const { sortQueueVideos } = require("./queue");
 
 function nowIso() {
   return new Date().toISOString();
@@ -359,15 +360,16 @@ class DaemonController {
 
     const isVideo = (entry) => entry.isFile() && VIDEO_EXTS.has(path.extname(entry.name).toLowerCase());
 
-    const pendingVideos = pendingEntries
+    const pendingByPath = new Map(pendingEntries
       .filter(isVideo)
       .map((entry) => {
         const ext = path.extname(entry.name);
         const base = entry.name.slice(0, -ext.length);
         const hasCaption = pendingEntries.some(e => e.isFile() && (e.name === `${base}.description` || e.name === `${base}.txt`));
-        return { name: entry.name, hasCaption };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+        return [path.join(this.queueDir, entry.name), { name: entry.name, hasCaption }];
+      }));
+    const pendingVideos = sortQueueVideos([...pendingByPath.keys()])
+      .map((videoPath) => pendingByPath.get(videoPath));
 
     return {
       counts: {
@@ -392,6 +394,7 @@ class DaemonController {
       defaultCaption: config.defaultCaption,
       defaultSoundQuery: config.defaultSoundQuery,
       randomQueueOrder: config.randomQueueOrder,
+      tiktokQueueDateAsc: config.tiktokQueueDateAsc,
       accountId: this.accountId,
       queue,
       lastRunAt: this.lastRunAt,
