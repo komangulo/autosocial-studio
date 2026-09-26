@@ -74,15 +74,8 @@ class JobStore {
     if (!Number.isFinite(scheduledAt.getTime())) throw new Error("A valid scheduled date is required.");
 
     return this._mutate((state) => {
-      // PATCH-TIKTOK-DEDUPE-TERMINAL
-      // No reutilizar un job que ya termino (cancelado/fallido/incierto):
-      // si no, el mismo video nunca se puede reintentar y se queda en pending.
       if (input.dedupeKey) {
-        const existing = state.jobs.find(
-          (job) =>
-            job.dedupeKey === input.dedupeKey &&
-            !["cancelled", "failed", "uncertain"].includes(job.status)
-        );
+        const existing = state.jobs.find((job) => job.dedupeKey === input.dedupeKey);
         if (existing) return existing;
       }
       const now = new Date().toISOString();

@@ -333,8 +333,6 @@ function createAutoCloneRouter(express, context = {}) {
         });
         lastSchedule = { at: new Date().toISOString(), ...result, accountId: active.id };
         run.total = result.total || run.total;
-        // PATCH-TIKTOK-HONEST-DONE
-        // done = videos que ARRANCARON el proceso, no los meramente encolados.
         run.done = result.created.length;
         if (!context.worker.isCancelled?.()) {
           await context.worker.drainTikTokQueue({

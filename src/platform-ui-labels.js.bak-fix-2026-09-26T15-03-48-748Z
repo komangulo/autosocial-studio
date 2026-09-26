@@ -72,14 +72,6 @@ const LABELS = {
     "post",
     "confirm",
     "continue",
-    // PATCH-TIKTOK-POST-NOW-LABELS
-    // TikTok muestra una segunda confirmacion cuando el video aun se verifica.
-    "post now",
-    "publish now",
-    "publicar ahora",
-    "publicar ya",
-    "postear ahora",
-    "posten jetzt",
     "ver\u00f6ffentlichen",
     "veroeffentlichen",
     "best\u00e4tigen",

@@ -111,10 +111,6 @@ class AutonomousWorker {
     this.pausedStatePath = options.pausedStatePath
       || path.join(path.dirname(config.autonomousStatePath), "autonomous-worker.paused");
     this.laneBusy = { "tiktok-publish": false, "flow-generate": false };
-    // PATCH-TIKTOK-TICK-DRAIN-EXCLUSIVE
-    // Mientras el boton "Programar todo" drena, el temporizador NO debe lanzar
-    // nada: si no, se abren DOS Chrome sobre el mismo perfil (exitCode=21).
-    this.draining = false;
     this.lastTickAt = null;
     this.lastError = null;
   }
@@ -208,8 +204,6 @@ class AutonomousWorker {
     let processed = 0;
     let published = 0;
     let failed = 0;
-    // PATCH-TIKTOK-DRAIN-CANCELLED
-    let cancelled = 0;
     try {
       while (processed < maxJobs) {
         if (this.isCancelled()) break;
@@ -217,9 +211,7 @@ class AutonomousWorker {
         if (!job) break;
         await onJob?.(job);
         if (this.isCancelled()) {
-          // PATCH-TIKTOK-DRAIN-CANCELLED
           // Devolvemos el job reclamado para que se pueda ejecutar luego.
-          cancelled += 1;
           try {
             if (typeof this.store.release === "function") {
               await this.store.release(job.id);
@@ -240,7 +232,7 @@ class AutonomousWorker {
     }
     // Resumen honesto: antes se devolvia solo un numero y el mensaje final
     // decia "N programados" aunque hubieran fallado.
-    return { processed, published, failed, cancelled };
+    return { processed, published, failed };
   }
 
   recordError(error) {
@@ -281,10 +273,6 @@ class AutonomousWorker {
 
   async tick(now = DateTime.now()) {
     if (this.dispatching) return;
-    // PATCH-TIKTOK-TICK-DRAIN-EXCLUSIVE
-    // Si el drenaje manual tiene el control, el temporizador no arranca NINGUN
-    // job de TikTok (ni deja un runClaimedJob en segundo plano).
-    if (this.draining) return;
     this.dispatching = true;
     this.lastTickAt = new Date().toISOString();
     try {
@@ -299,9 +287,6 @@ class AutonomousWorker {
   }
 
   async dispatchLane(type, now) {
-    // PATCH-TIKTOK-TICK-DRAIN-EXCLUSIVE
-    // Si el drenaje manual esta activo, el temporizador no lanza NADA.
-    if (this.draining) return;
     // MARKER: TIKTOK-LANE-EXCLUSIVE-v1
     // Si el bucle de drenaje tiene el lane tomado, no lanzar otro job.
     if (this.laneBusy[type]) return;

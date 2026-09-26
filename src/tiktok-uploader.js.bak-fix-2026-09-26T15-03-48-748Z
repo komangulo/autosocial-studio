@@ -2615,59 +2615,6 @@ function createPublishResponseTracker(page) {
   };
 }
 
-/**
- * // PATCH-TIKTOK-POST-NOW-CONFIRM
- * TikTok muestra un segundo dialogo cuando pulsas Publicar/Programar mientras
- * el video AUN se esta verificando ("Content check lite"). Ese dialogo tiene un
- * boton con doble confirmacion: "Post now" / "Publicar ahora". Hay que pulsarlo.
- *
- * Devuelve true si lo encontro y lo pulso.
- */
-async function clickPostNowConfirm(page) {
-  const pattern = /^(post\s*now|publish\s*now|publicar\s*ahora|publicar\s*ya|postear\s*ahora|posten\s*jetzt|veröffentlichen\s*jetzt|publier\s*maintenant)$/i;
-  const scopes = [
-    '[role="dialog"]',
-    '[aria-modal="true"]',
-    '[class*="modal" i]',
-    '[class*="Modal" i]',
-    '[class*="popover" i]',
-    '[class*="confirm" i]',
-    '[class*="Confirm" i]',
-  ].join(", ");
-
-  const tryClick = async (locator, label) => {
-    const total = await locator.count().catch(() => 0);
-    for (let i = 0; i < total; i += 1) {
-      const candidate = locator.nth(i);
-      const visible = await candidate.isVisible().catch(() => false);
-      if (!visible) continue;
-      const text = ((await candidate.innerText().catch(() => "")) || "").trim();
-      if (!pattern.test(text)) continue;
-      await candidate.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
-      await candidate.click({ timeout: 4000 }).catch(async () => {
-        await candidate.click({ timeout: 4000, force: true }).catch(() => {});
-      });
-      console.log(`TikTok: pulsado el boton de confirmacion "${text}" (${label}).`);
-      return true;
-    }
-    return false;
-  };
-
-  // 1) Dentro de dialogos/modales (lo mas fiable).
-  if (await tryClick(page.locator(scopes).locator("button, [role='button']"), "scope")) {
-    return true;
-  }
-  // 2) Por clase concreta de TikTok (TUXButton) como respaldo.
-  if (await tryClick(page.locator("button.TUXButton, button[class*='TUXButton' i]"), "TUXButton")) {
-    return true;
-  }
-  // 3) Por texto exacto en toda la pagina, como ultimo recurso.
-  if (await tryClick(page.getByRole("button", { name: pattern }), "role")) {
-    return true;
-  }
-  return false;
-}
-
 async function trySecondaryPublishConfirm(page) {
   const confirmTerms = uiLabels
     .terms("tiktokConfirm")
@@ -2777,13 +2724,6 @@ async function waitForPublishConfirmation(page, responseTracker, scheduleMode = 
           ok: true,
           reason: "Success confirmation text found.",
         };
-      }
-
-      // PATCH-TIKTOK-POST-NOW-CONFIRM
-      // Si TikTok pide una segunda confirmacion ("Post now"), pulsarla.
-      if (await clickPostNowConfirm(page)) {
-        await page.waitForTimeout(1500);
-        continue;
       }
 
       await trySecondaryPublishConfirm(page);
@@ -3326,13 +3266,10 @@ async function closeSharedTikTokBrowser() {
 
 async function uploadVideo({ videoPath, coverPath, caption, source, accountId, onPhase, scheduledAt, scheduleTimezone, location, aiGenerated, page: sharedPage, context: sharedContext, reuseBrowser}) {
   const absoluteVideoPath = path.resolve(videoPath);
-  // PATCH-TIKTOK-SHARED-BROWSER-ACTUALLY-USED
-  // Con reuseBrowser SIEMPRE se usa el navegador compartido del lote, aunque
-  // no vengan page/context ya abiertos: se piden aqui. Antes, al no venir,
-  // ownsBrowser quedaba en true y cada video abria y cerraba su propio Chrome
-  // (25s de espera "Holding browser" por video).
-  const wantShared = Boolean(reuseBrowser);
-  const ownsBrowser = !wantShared;
+  // MARKER: TIKTOK-REUSE-BROWSER-v1
+  // Con reuseBrowser la pagina y el contexto vienen del lote (un solo
+  // navegador para todos los videos) y NO se cierran aqui.
+  const ownsBrowser = !(reuseBrowser && sharedPage && sharedContext);
   // Si reuseBrowser, tomamos el navegador del lote (se cierra solo al
   // terminar el ultimo video). Si no, abrimos uno propio para este video.
   let lease = null;
@@ -3341,11 +3278,7 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
   if (ownsBrowser) {
     context = await openContextWithRetry(accountId);
     page = context.pages()[0] || (await context.newPage());
-  } else if (sharedPage && sharedContext) {
-    context = sharedContext;
-    page = sharedPage;
   } else {
-    // PATCH-TIKTOK-SHARED-BROWSER-ACTUALLY-USED
     lease = await acquireSharedTikTokBrowser(accountId);
     context = lease.context;
     page = lease.page;
@@ -3432,9 +3365,7 @@ async function uploadVideo({ videoPath, coverPath, caption, source, accountId, o
       .screenshot({ path: successScreenshotPath, fullPage: true })
       .catch(() => { });
 
-    // PATCH-TIKTOK-SHARED-BROWSER-ACTUALLY-USED
-    // Con navegador compartido no hay que "sostener" 25s por video: se baja a 2s.
-    closeHoldMs = lease ? 2000 : Math.max(config.postPublishHoldMs, 0);
+    closeHoldMs = Math.max(config.postPublishHoldMs, 0);
     return { ok: true, scheduled: scheduleMode };
   } catch (error) {
     const screenshotPath = path.resolve(

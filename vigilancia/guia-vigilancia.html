@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Vigilancia diaria de subvenciones</title>
+<style>
+  :root{--bg:#0e1117;--card:#161b22;--bd:#283040;--tx:#e6edf3;--mut:#9aa7b4;--acc:#4c8dff;--ok:#3fb950;--warn:#d29922;--err:#f85149}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:26px;margin:0 0 6px}
+  .sub{color:var(--mut);margin:0 0 24px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+  h2{font-size:16px;margin:0 0 12px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  ul{margin:6px 0 0;padding-left:20px}
+  li{margin:4px 0}
+  code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+  pre{background:#0b0f14;border:1px solid var(--bd);border-radius:8px;padding:12px 14px;overflow:auto;font-size:13px;color:#c9d3de}
+  .pill{display:inline-block;background:#1f2937;border:1px solid var(--bd);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--mut);margin-right:6px}
+  .k{color:var(--acc);font-weight:600}
+  .ok{color:var(--ok)}.warn{color:var(--warn)}
+  .steps li{margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--bd)}
+  th{color:var(--mut);font-size:12px;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Vigilancia diaria de subvenciones</h1>
+  <p class="sub">Una pestana nueva en tu dashboard que revisa las ayudas de la Comunidad de Madrid y del Estado cada dia a las 10:00 y te avisa por correo.</p>
+
+  <div class="card">
+    <h2>Que busca cada dia</h2>
+    <ul>
+      <li>Region de impacto: <span class="k">ES3 - Comunidad de Madrid</span></li>
+      <li>Beneficiario: <span class="k">personas fisicas que no desarrollan actividad economica</span></li>
+      <li>Solo convocatorias <span class="k">abiertas</span> (plazo vigente)</li>
+      <li>Registradas en las <span class="k">ultimas 24 horas</span></li>
+      <li>Dos grupos: <b>Comunidad de Madrid</b> y <b>Administracion del Estado</b></li>
+    </ul>
+    <p style="color:var(--mut);margin:12px 0 0;font-size:13.5px">Todo lo que no cumpla estos criterios se descarta: nada de ruido en el correo.</p>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>El correo</h2>
+      <ul>
+        <li>Se envia a <span class="k">contacto.liberal.swinger@gmail.com</span></li>
+        <li>Desde el inbox de AgentMail <span class="k">medicalchina@agentmail.to</span></li>
+        <li>Con tabla por grupos, enlaces clicables y adjunto JSON/CSV</li>
+        <li>Si no hay novedades, avisa igualmente: <em>"sin novedades"</em></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>En el dashboard</h2>
+      <ul>
+        <li>Pestana <b>Vigilancia &gt; Subvenciones</b>, con ventana propia</li>
+        <li>Boton <b>Comprobar ahora</b></li>
+        <li>Boton <b>Previsualizar correo</b> (sin enviarlo)</li>
+        <li>Historial de las ultimas revisiones</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Instalacion</h2>
+    <ol class="steps">
+      <li>Copia la carpeta <code>vigilancia/</code> a la raiz del proyecto (<code>...\autosocial-studio\</code>).</li>
+      <li>En Git Bash, en la raiz del proyecto:
+        <pre>cd /c/Users/msi/Downloads/autosocial-studio
+node vigilancia/instalar-vigilancia.js</pre></li>
+      <li>Reinicia el dashboard:
+        <pre>npm run dashboard</pre></li>
+      <li>Entra en el menu <b>Vigilancia &gt; Subvenciones</b> y pulsa <b>Guardar</b>.</li>
+    </ol>
+    <p style="margin:14px 0 0">
+      <span class="pill">Sin dependencias nuevas</span>
+      <span class="pill">Con reversion <code>--revert</code></span>
+      <span class="pill">No toca el codigo de TikTok</span>
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Como te llega el correo (ejemplo con novedades)</h2>
+    <table>
+      <tr><th>Grupo</th><th>Convocatoria</th><th>Fin plazo</th></tr>
+      <tr><td>Comunidad de Madrid</td><td>Ayudas conciliacion trabajadores desempleados</td><td class="ok">abierto</td></tr>
+      <tr><td>Comunidad de Madrid</td><td>Ayudas transporte publico - anticipada</td><td>30/10/2026</td></tr>
+      <tr><td>Administracion del Estado</td><td>Ayudas Erasmus+ juventud</td><td>15/11/2026</td></tr>
+    </table>
+    <p style="color:var(--mut);font-size:13px;margin:10px 0 0">Asi se ve la tabla; cada fila enlaza a la convocatoria. Ya te he enviado dos correos de prueba a tu direccion.</p>
+  </div>
+
+  <div class="card">
+    <h2>Notas utiles</h2>
+    <ul>
+      <li>La revision automatica usa tu hora local (<span class="k">Europe/Madrid</span>).</li>
+      <li>El estado se guarda en <code>.runtime/vigilancia/</code>, asi que sobrevive a reinicios.</li>
+      <li>Si algun dia falla la web de subvenciones, el error queda en el historial y no rompe el dashboard.</li>
+      <li>Para deshacer todo: <code>node vigilancia/instalar-vigilancia.js --revert</code></li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

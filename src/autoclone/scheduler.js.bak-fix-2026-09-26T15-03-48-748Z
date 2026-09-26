@@ -389,11 +389,6 @@ async function finalizeSchedule({ accountId, folder, created, worker } = {}) {
       await moveToFailed(item.sourcePath, failedDir);
       state.failedNames = [...(state.failedNames || []), item.videoName];
       result.failed += 1;
-    } else if (job.status === "cancelled") {
-      // PATCH-TIKTOK-CANCELLED-NOT-FAILED
-      // Cancelado por el usuario != fallo: NO se anota en failedNames
-      // (eso impediria volver a programarlo) ni se mueve a failed.
-      result.pending += 1;
     } else {
       result.pending += 1;
     }
