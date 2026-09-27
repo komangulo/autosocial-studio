@@ -121,11 +121,46 @@ class VigilanciaWorker {
     if (!cron.validate(expr)) {
       this.logger.error?.(`[vigilancia] expresion cron invalida: ${expr}`);
       return null;
-    }    this.cronTask = cron.schedule(expr, () => {
+    }
+    this.cronTask = cron.schedule(expr, () => {
       this.runOnce({ trigger: "cron" }).catch((e) => this.logger.error?.("[vigilancia] error:", e.message));
     }, { timezone: "Europe/Madrid" });
     this.logger.log?.(`[vigilancia] programada a las ${String(cfg.hour).padStart(2, "0")}:${String(cfg.minute).padStart(2, "0")} (Europe/Madrid).`);
     return expr;
+  }
+
+  /**
+   * Recupera la revision perdida: si hoy ya paso la hora programada y aun no
+   * se ha ejecutado la revision de hoy, la lanza (con un retraso corto para no
+   * bloquear el arranque del dashboard).
+   */
+  catchUp({ delayMs = 8000 } = {}) {
+    try {
+      const cfg = getConfig(this.rootDir);
+      if (!cfg.enabled) return { ran: false, reason: "disabled" };
+
+      const now = new Date();
+      const target = new Date(now);
+      target.setHours(cfg.hour, cfg.minute, 0, 0);
+      if (now < target) return { ran: false, reason: "too-early" };
+
+      const todayKey = now.toISOString().slice(0, 10);
+      const history = getHistory(this.rootDir, 200);
+      const ranToday = history.some((h) => {
+        const at = String(h.at || "").slice(0, 10);
+        return at === todayKey && !h.error;
+      });
+      if (ranToday) return { ran: false, reason: "already-ran" };
+
+      this.logger.log?.("[vigilancia] revision de hoy pendiente; se recupera al arrancar.");
+      setTimeout(() => {
+        this.runOnce({ trigger: "catch-up" }).catch((e) => this.logger.error?.("[vigilancia] catch-up error:", e.message));
+      }, delayMs);
+      return { ran: true, reason: "scheduled", at: new Date(Date.now() + delayMs).toISOString() };
+    } catch (error) {
+      this.logger.error?.("[vigilancia] catchUp fallo:", error.message);
+      return { ran: false, reason: error.message };
+    }
   }
 
   unschedule() {
@@ -146,7 +181,7 @@ class VigilanciaWorker {
    * @param {boolean} [opts.sendEmail=true]
    * @param {number} [opts.windowHours]
    */
-  async runOnce({ trigger = "manual", sendEmail = true, windowHours } = {}) {
+  async runOnce({ trigger = "manual", sendEmail = true, windowHours, forceEmail = false } = {}) {
     if (this.running) {
       return { ok: false, error: "Ya hay una vigilancia en curso." };
     }
@@ -156,8 +191,14 @@ class VigilanciaWorker {
     try {
       const result = await runWatch({ windowHours: hours });
       let mail = null;
-      if (sendEmail) {
+      let skipped = false;
+      // Si no hay novedades, NO se envia correo (salvo que se fuerce con
+      // forceEmail, que usa la prueba manual).
+      const shouldEmail = sendEmail && (result.total > 0 || forceEmail);
+      if (shouldEmail) {
         mail = await sendReport({ config: cfg.email, result });
+      } else if (sendEmail) {
+        skipped = true;
       }
       const entry = {
         at: new Date().toISOString(),
@@ -167,6 +208,7 @@ class VigilanciaWorker {
         today: result.today,
         total: result.total,
         groups: result.groups,
+        skippedEmail: skipped,
         mail: mail ? { ok: true, messageId: mail.messageId, subject: mail.subject } : null,
         items: result.items,
       };

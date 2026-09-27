@@ -81,7 +81,7 @@
       const estado = (g.find((x) => x.id === "estado") || {}).accepted || 0;
       const when = (h.at || "").replace("T", " ").slice(0, 16);
       const summary = h.error ? `<span class="vig-err">error</span>` : `${h.total || 0} (M:${madrid} / E:${estado})`;
-      const mail = h.mail && h.mail.ok ? " · correo enviado" : "";
+      const mail = h.mail && h.mail.ok ? " · correo enviado" : (h.skippedEmail ? " · sin novedades" : "");
       return `<div class="vig-hist-row"><span>${esc(when)}</span><b>${summary}</b><span class="vig-meta">${esc(h.trigger || "")}${mail}</span></div>`;
     }).join("");
   }
@@ -151,7 +151,8 @@
         status("Comprobando convocatorias y enviando correo...", "warn");
         el("vig-run").disabled = true;
         const out = await api("/run", { method: "POST", body: JSON.stringify({ sendEmail: true }) });
-        status(`Hecho: ${out.total} nuevas. Correo enviado.`, "ok");
+        const nuevas = out.total || 0;
+        status(nuevas > 0 ? `Hecho: ${nuevas} nuevas. Correo enviado.` : "Hecho: sin novedades. No se envia correo.", nuevas > 0 ? "ok" : "warn");
         const { items } = await api("/history?limit=30");
         renderResult(items[0]);
         renderHistory(items);

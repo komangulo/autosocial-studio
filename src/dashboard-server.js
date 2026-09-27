@@ -279,7 +279,7 @@ async function createServer() {
   app.use("/api/autoclone", createAutoCloneRouter(express, { getActiveAccount, worker: autonomousWorker }));
   // MARKER: VIGILANCIA-WORKER-v1
   const vigilanciaWorker = new VigilanciaWorker({ rootDir: path.join(__dirname, "..") });
-  try { vigilanciaWorker.schedule(); } catch (e) { console.error("[vigilancia] no se pudo programar:", e.message); }
+  try { vigilanciaWorker.schedule(); vigilanciaWorker.catchUp?.(); } catch (e) { console.error("[vigilancia] no se pudo programar:", e.message); }
   app.use("/api/vigilancia", createVigilanciaRouter(express, { rootDir: path.join(__dirname, ".."), worker: vigilanciaWorker }));
 
   app.get("/api/helios/media/:name", async (req, res) => {

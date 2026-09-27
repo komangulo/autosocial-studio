@@ -84,7 +84,8 @@ function createVigilanciaRouter(express, { rootDir, worker } = {}) {
   // Prueba de correo: envia el informe aunque no haya novedades (ventana amplia).
   router.post("/test-email", route(async (req, res) => {
     const hours = Number(req.body && req.body.windowHours) || 24 * 30;
-    const out = await w.runOnce({ trigger: "test", sendEmail: true, windowHours: hours });
+    // La prueba SIEMPRE envia correo, aunque no haya novedades.
+    const out = await w.runOnce({ trigger: "test", sendEmail: true, windowHours: hours, forceEmail: true });
     res.json(out.ok ? { ok: true, total: out.result.total, mail: out.mail } : out);
   }));
 
