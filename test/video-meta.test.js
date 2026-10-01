@@ -8,32 +8,22 @@ const {
   metaFromInfoJson,
   normalizeTagList,
   translateMetaToSpanish,
-  preserveTitleHashtags,
   writeMetaFromInfoJson,
   enrichRecentVideos,
 } = require("../src/video-meta");
 const { readCaption, readVideoMeta, getMetaPath, buildCaptionFromMeta } = require("../src/queue");
 
-test("video-meta metaFromInfoJson keeps title, description and hashtags", () => {
+test("video-meta metaFromInfoJson keeps the description as the caption", () => {
   const meta = metaFromInfoJson({
     title: "Receta de tortilla",
     description: "La mejor tortilla #receta #cocina",
     tags: ["receta", "cocina"],
   });
-  assert.equal(meta.title, "Receta de tortilla");
+  // Solo se conserva la descripcion (que ya incluye los hashtags). El titulo de
+  // TikTok viene truncado, asi que se descarta.
+  assert.equal(meta.title, undefined);
   assert.equal(meta.description, "La mejor tortilla #receta #cocina");
-  assert.deepEqual(meta.hashtags, ["receta", "cocina"]);
-  // The caption merges title + description and already has the hashtags present.
-  assert.ok(meta.caption.includes("Receta de tortilla"));
-  assert.ok(meta.caption.includes("#receta"));
-});
-
-test("video-meta falls back to hashtags embedded in the text", () => {
-  const meta = metaFromInfoJson({
-    title: "Truco",
-    description: "Mira esto #viral #parati",
-  });
-  assert.deepEqual(meta.hashtags, ["viral", "parati"]);
+  assert.equal(meta.caption, "La mejor tortilla #receta #cocina");
 });
 
 test("video-meta normalizeTagList strips # and dedupes", () => {
@@ -53,13 +43,13 @@ test("video-meta writes a .meta.json companion from an info.json", async () => {
       "utf8"
     );
     const meta = await writeMetaFromInfoJson(video);
-    assert.equal(meta.title, "Hola");
+    assert.equal(meta.description, "Mundo #tag");
     const stored = JSON.parse(await fs.readFile(getMetaPath(video), "utf8"));
-    assert.equal(stored.title, "Hola");
-    assert.deepEqual(stored.hashtags, ["tag"]);
-    // readCaption must prefer the companion metadata.
+    assert.equal(stored.description, "Mundo #tag");
+    assert.equal(stored.title, undefined);
+    // readCaption must prefer the companion metadata (the description).
     const caption = await readCaption(video);
-    assert.ok(caption.includes("Hola"));
+    assert.ok(caption.includes("Mundo"));
     assert.ok(caption.includes("#tag"));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -80,23 +70,25 @@ test("video-meta enrichRecentVideos creates companions only for recent files", a
     const summary = await enrichRecentVideos(dir, 0);
     assert.equal(summary.processed, 1);
     const meta = await readVideoMeta(video);
-    assert.equal(meta.title, "Clip");
+    assert.equal(meta.description, "Desc #x");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
-test("video-meta buildCaptionFromMeta does not duplicate the title", () => {
+test("video-meta buildCaptionFromMeta uses the description as the caption", () => {
   const caption = buildCaptionFromMeta({
     title: "Receta",
     description: "Receta facil #cocina",
     hashtags: ["cocina", "viral"],
   });
-  assert.equal((caption.match(/Receta/g) || []).length, 1);
-  assert.ok(caption.includes("#viral"));
+  // El caption es exactamente la descripcion; el titulo no se duplica.
+  assert.equal(caption, "Receta facil #cocina");
+  // Sin descripcion, cae al titulo como ultimo recurso.
+  assert.equal(buildCaptionFromMeta({ title: "Solo titulo" }), "Solo titulo");
 });
 
-test("video-meta translates title and description while preserving hashtags", async () => {
+test("video-meta translates only the description while preserving hashtags", async () => {
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async (url) => {
@@ -105,9 +97,7 @@ test("video-meta translates title and description while preserving hashtags", as
       ok: true,
       async json() {
         return { candidates: [{ content: { parts: [{ text: JSON.stringify({
-          title: "Ella todavia no lo sabe",
-           description: "Voy a mantenerlo asi.",
-          hashtags: ["booktok", "bookgirlies"],
+          description: "Voy a mantenerlo asi.",
         }) }] } }] };
       },
     };
@@ -115,22 +105,13 @@ test("video-meta translates title and description while preserving hashtags", as
   try {
     const translated = await translateMetaToSpanish({
       title: "She still does not know",
-       description: "I am going to keep it that way. #booktok #bookgirlies",
-      hashtags: ["booktok", "bookgirlies"],
+      description: "I am going to keep it that way. #booktok #bookgirlies",
     }, { apiKey: "free-key" });
-    assert.equal(translated.title, "Ella todavia no lo sabe");
+    assert.equal(translated.title, undefined);
     assert.equal(translated.description, "Voy a mantenerlo asi. #booktok #bookgirlies");
-    assert.deepEqual(translated.hashtags, ["booktok", "bookgirlies"]);
-    assert.ok(translated.caption.includes("Ella todavia no lo sabe"));
+    assert.equal(translated.caption, "Voy a mantenerlo asi. #booktok #bookgirlies");
     assert.equal(calls.length, 1);
   } finally {
     global.fetch = originalFetch;
   }
-});
-
-test("video-meta preserves hashtags embedded in a truncated title", () => {
-  assert.equal(
-    preserveTitleHashtags("Titulo traducido", "Titulo original #booktok #m..."),
-    "Titulo traducido #booktok #m..."
-  );
 });
