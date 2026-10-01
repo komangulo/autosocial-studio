@@ -45,6 +45,7 @@ const {
   getAccountQueueDirs,
   requireAccount,
   hasSavedPlatformSession,
+  removeAccount, // MARKER: BOTON-ELIMINAR-CUENTA
 } = require("./account-manager");
 const { accountVault, generateTikTokPassword } = require("./account-vault");
 const googleFlow = require("./google-flow");
@@ -276,7 +277,7 @@ async function createServer() {
   app.use("/api/studio", studio.router);
   app.use("/api/helios", createHeliosRouter(express));
   app.use("/api/competitor", createCompetitorRouter(express));
-  app.use("/api/autoclone", createAutoCloneRouter(express, { getActiveAccount, worker: autonomousWorker }));
+  app.use("/api/autoclone", createAutoCloneRouter(express, { getActiveAccount, worker: autonomousWorker, getAccount: requireAccount }));
   // MARKER: VIGILANCIA-WORKER-v1
   const vigilanciaWorker = new VigilanciaWorker({ rootDir: path.join(__dirname, "..") });
   try { vigilanciaWorker.schedule(); vigilanciaWorker.catchUp?.(); } catch (e) { console.error("[vigilancia] no se pudo programar:", e.message); }
@@ -944,6 +945,18 @@ async function createServer() {
     }
   });
 
+  // MARKER: BOTON-ELIMINAR-CUENTA
+  app.post("/api/accounts/remove", async (req, res) => {
+    try {
+      const removed = await removeAccount(req.body?.accountId);
+      const state = await getState();
+      const active = await getActiveAccount();
+      res.json({ ok: true, removed, state, activeAccount: active });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
   app.get("/api/x-autopilot", async (req, res) => {
     try { res.json(await xAutopilot.getStatus((await getActiveAccount()).id)); }
     catch (error) { res.status(500).json({ ok: false, error: error.message }); }
@@ -967,9 +980,11 @@ async function createServer() {
 
   // Login endpoints (TikTok)
 
+  // AISLAR-CUENTAS-TIKTOK: estos endpoints respetan la cuenta seleccionada (?accountId / body)   
   app.post("/api/tiktok/login", async (req, res) => {
     try {
-      const result = await startTikTokLoginSession();
+      const accountId = req.body?.accountId || req.query?.accountId || undefined;
+      const result = await startTikTokLoginSession(accountId);
       res.json(result);
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
@@ -977,7 +992,12 @@ async function createServer() {
   });
 
   app.get("/api/tiktok/login/status", async (req, res) => {
-    res.json(await getTikTokLoginSessionStatus());
+    try {
+      const accountId = req.query?.accountId || undefined;
+      res.json(await getTikTokLoginSessionStatus(accountId));
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
   });
   app.post("/api/tiktok/login/close", async (req, res) => {
     try {

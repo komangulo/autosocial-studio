@@ -2042,6 +2042,8 @@ async function setTikTokTime(page, control, value) {
 }
 
 /** Set TikTok's custom calendar picker by navigating to the month and day. */
+// // MARKER: TIKTOK-CALENDAR-MONTH-HEADER-v1
+// // MARKER: TIKTOK-CALENDAR-ARROWS-v3
 async function setTikTokDate(page, control, value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || "").trim());
   if (!match) return false;
@@ -2049,172 +2051,112 @@ async function setTikTokDate(page, control, value) {
   const targetMonth = Number(match[2]); // 1-12
   const targetDay = String(Number(match[3]));
 
-  // Read the date field's live centre: the layout can shift while the timepicker
-  // closes, so stale coordinates would click the wrong control.
-  const datePoint = await page.evaluate(() => {
-    const fields = [...document.querySelectorAll("input.TUXTextInputCore-input, input[readonly]")]
-      .filter((el) => el.offsetParent !== null && el.getBoundingClientRect().width > 0);
-    // Prefer a field whose value looks like a date (YYYY-MM-DD).
-    const field = fields.find((el) => /^\d{4}-\d{2}-\d{2}$/.test(String(el.value || "").trim())) || fields[fields.length - 1];
-    if (!field) return null;
-    field.scrollIntoView({ block: "center" });
-    const rect = field.getBoundingClientRect();
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-  }).catch(() => null);
-
-  const point = datePoint || { x: control.x, y: control.y };
-  await page.mouse.click(point.x, point.y);
-  await page.waitForTimeout(900);
-  await debugLog(`  date: clicked field at (${point.x},${point.y}); state=${JSON.stringify(await describeScheduleState(page))}`);
-
   const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
-  // The calendar is whichever visible overlay contains a grid of day numbers.
-  // TikTok keeps other overlays (like the location search) with numeric text in
-  // the DOM, so we require a real month name + a plausible year and reject
-  // location/search panels.
-  const findCalendar = () => page.evaluate((monthNames) => {
-    const visible = [...document.querySelectorAll("div")].filter((element) => {
-      if (element.offsetParent === null) return false;
-      const rect = element.getBoundingClientRect();
-      return rect.width > 120 && rect.height > 120;
-    });
-    // Score panels by how many 1..31 numbers they contain.
-    let best = null;
-    for (const panel of visible) {
-      const text = (panel.textContent || "").toLowerCase();
-      if (/location|ubicaci|search|buscar/i.test(text)) continue;
-      const numbers = [...panel.querySelectorAll("span, div, td, button")]
-        .filter((el) => el.offsetParent !== null)
-        .map((el) => (el.textContent || "").trim())
-        .filter((entry) => /^\d{1,2}$/.test(entry) && Number(entry) >= 1 && Number(entry) <= 31);
-      const uniqueDays = new Set(numbers);
-      if (uniqueDays.size < 20) continue;
-      const monthIndex = monthNames.findIndex((name) => new RegExp(`\\b${name}\\b`, "i").test(text));
-      const yearMatch = text.match(/(20\d{2})/);
-      const year = yearMatch ? Number(yearMatch[1]) : null;
-      // A real calendar header shows a month name; without it this is not a calendar.
-      if (monthIndex < 0) continue;
-      if (year !== null && (year < 2020 || year > 2035)) continue;
-      const headerValue = panel.querySelector("input, [class*='month' i], [class*='header' i], header");
-      const score = uniqueDays.size;
-      if (!best || score > best.score) {
-        best = {
-          score,
-          month: monthIndex + 1,
-          year,
-          header: headerValue ? (headerValue.textContent || headerValue.value || "").trim() : "",
-        };
-      }
-    }
-    return best;
-  }, monthNames);
-
-  const clickDay = (day) => page.evaluate(({ wanted, monthNames }) => {
-    const visible = [...document.querySelectorAll("div")].filter((element) => {
-      if (element.offsetParent === null) return false;
-      const rect = element.getBoundingClientRect();
-      return rect.width > 120 && rect.height > 120;
-    });
-    // Pick the same panel findCalendar would: a real month header, no location text.
-    let target = null;
-    let bestScore = 0;
-    for (const panel of visible) {
-      const text = (panel.textContent || "").toLowerCase();
-      if (/location|ubicaci|search|buscar/i.test(text)) continue;
-      const monthIndex = monthNames.findIndex((name) => new RegExp(`\\b${name}\\b`, "i").test(text));
-      if (monthIndex < 0) continue;
-      const yearMatch = text.match(/(20\d{2})/);
-      const year = yearMatch ? Number(yearMatch[1]) : null;
-      if (year !== null && (year < 2020 || year > 2035)) continue;
-      const numbers = new Set(
-        [...panel.querySelectorAll("span, div, td, button")]
-          .filter((el) => el.offsetParent !== null)
-          .map((el) => (el.textContent || "").trim())
-          .filter((entry) => /^\d{1,2}$/.test(entry) && Number(entry) >= 1 && Number(entry) <= 31)
-      );
-      if (numbers.size < 20) continue;
-      if (numbers.size > bestScore) { bestScore = numbers.size; target = panel; }
-    }
-    if (!target) return null;
-    const cells = [...target.querySelectorAll("td, button, [class*='day' i], [class*='cell' i], span, div")]
-      .filter((el) => el.offsetParent !== null && (el.textContent || "").trim() === wanted);
-    // Prefer the most deeply nested element (the day cell, not its container).
-    const sorted = cells.sort((a, b) => b.querySelectorAll("*").length - a.querySelectorAll("*").length);
-    const cell = sorted[0];
-    if (!cell || /(disabled|outside|other|prev|next)-?/i.test(cell.className)) return null;
-    const row = cell.closest("[class*='day' i], td, button") || cell;
-    const rect = row.getBoundingClientRect();
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-  }, { wanted: day, monthNames }).then(async (point) => {
-    if (!point) return false;
-    await page.mouse.click(point.x, point.y);
-    return true;
-  });
-
-  const clickNextMonth = () => page.evaluate(() => {
-    const selectors = [
-      "[class*='next' i]",
-      "button[aria-label*='next' i]",
-      "[data-testid*='next' i]",
-      "[data-icon*='right' i]",
-      "[aria-label*='next' i]",
-    ];
-    const candidates = [];
-    for (const selector of selectors) {
-      candidates.push(...document.querySelectorAll(selector));
-    }
-    const button = candidates.find((el) => el.offsetParent !== null && !el.disabled);
-    if (button) { button.click(); return true; }
-    return false;
-  });
-
-  // Make sure the calendar actually opened before scanning for the month/day.
-  // A close animation or reflow can swallow the first click; retry a few times
-  // with freshly read coordinates.
-  for (let openTry = 0; openTry < 3; openTry += 1) {
-    const header = await findCalendar();
-    if (header && header.month && header.year) break;
-    const fresh = await page.evaluate(() => {
+  // Abrir el calendario clicando el campo de fecha (coordenadas leidas en vivo).
+  const openCalendar = async () => {
+    const point = await page.evaluate(() => {
       const fields = [...document.querySelectorAll("input.TUXTextInputCore-input, input[readonly]")]
         .filter((el) => el.offsetParent !== null && el.getBoundingClientRect().width > 0);
       const field = fields.find((el) => /^\d{4}-\d{2}-\d{2}$/.test(String(el.value || "").trim())) || fields[fields.length - 1];
       if (!field) return null;
+      field.scrollIntoView({ block: "center" });
       const rect = field.getBoundingClientRect();
       return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     }).catch(() => null);
-    if (!fresh) break;
-    await page.mouse.click(fresh.x, fresh.y);
+    const p = point || { x: control.x, y: control.y };
+    await page.mouse.click(p.x, p.y);
     await page.waitForTimeout(700);
-    await debugLog(`  date: reopen attempt ${openTry + 1} at (${fresh.x},${fresh.y})`);
-  }
+    return p;
+  };
 
-  for (let attempt = 0; attempt < 15; attempt += 1) {
-    const header = await findCalendar();
-    await debugLog(`  date: iteration ${attempt + 1} header=${JSON.stringify(header)}`);
-    if (header && header.month && header.year) {
-      const sameMonth = header.year === targetYear && header.month === targetMonth;
-      const ahead = header.year > targetYear || (header.year === targetYear && header.month > targetMonth);
-      if (sameMonth) {
-        if (await clickDay(targetDay)) { await page.waitForTimeout(500); await debugLog(`  date: clicked day ${targetDay}`); return true; }
-        break;
-      }
-      if (ahead) break; // overshot; give up rather than guess
-    }
-    const advanced = await clickNextMonth();
-    await debugLog(`  date: next-month clicked=${advanced}`);
-    if (!advanced) break;
-    await page.waitForTimeout(500);
-  }
+  // Lee mes/anio del titulo del calendario.
+  const readHeader = () => page.evaluate((monthNames) => {
+    const title = document.querySelector(".month-title");
+    const year = document.querySelector(".year-title");
+    if (!title) return null;
+    const m = monthNames.findIndex((name) => new RegExp("^" + name + "$", "i").test((title.textContent || "").trim()));
+    if (m < 0) return null;
+    const y = year ? Number((year.textContent || "").replace(/[^0-9]/g, "")) : null;
+    return { month: m + 1, year: y };
+  }, monthNames).catch(() => null);
 
-  // Fallback: click the day cell anywhere in a visible picker.
-  const clicked = await clickDay(targetDay);
-  await debugLog(`  date: fallback click day=${targetDay} -> ${clicked}`);
-  if (!clicked) {
-    // Save the open calendar so we can wire the exact selectors next time.
+  // Pulsa la flecha de mes: index 0 = anterior, 1 = siguiente.
+  // Las flechas son <span class="arrow"> dentro de .month-header-wrapper.
+  const pressArrow = (next) => page.evaluate(({ goNext }) => {
+    const header = document.querySelector(".month-header-wrapper");
+    if (!header) return false;
+    const arrows = [...header.querySelectorAll("span.arrow, .arrow")]
+      .filter((el) => el.offsetParent !== null);
+    const arrow = goNext ? arrows[arrows.length - 1] : arrows[0];
+    if (!arrow) return false;
+    const rect = arrow.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  }, { goNext: next }).then(async (point) => {
+    if (!point) return false;
+    await page.mouse.click(point.x, point.y);
+    await page.waitForTimeout(450);
+    return true;
+  }).catch(() => false);
+
+  // Clic en una celda de dia DEL MES ACTUAL. Los dias del mes en curso llevan
+  // la clase "valid" (y "selected" si esta elegido); los de meses vecinos no.
+  const clickDay = async (day) => {
+    const point = await page.evaluate(({ wanted }) => {
+      const cells = [...document.querySelectorAll(".days-wrapper .day")]
+        .filter((el) => el.offsetParent !== null && (el.textContent || "").trim() === wanted);
+      if (!cells.length) return null;
+      // El del mes actual es el que tiene "valid" (o "selected").
+      const inMonth = cells.find((el) => /(^|\s)(valid|selected)(\s|$)/.test(el.className));
+      const chosen = inMonth || cells[cells.length - 1];
+      const rect = chosen.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    }, { wanted: day }).catch(() => null);
+    if (!point) return false;
+    await page.mouse.click(point.x, point.y);
+    await page.waitForTimeout(400);
+    return true;
+  };
+
+  // Asegurar calendario abierto.
+  let header = await readHeader();
+  for (let openTry = 0; !header && openTry < 3; openTry += 1) {
+    const opened = await openCalendar();
+    await debugLog("  date: open attempt " + (openTry + 1) + " at (" + opened.x + "," + opened.y + ")");
+    header = await readHeader();
+  }
+  if (!header) {
+    await debugLog("  date: calendar did not open (.month-title missing)");
     await dumpScheduleDiagnostics(page, "date-calendar");
+    return false;
   }
-  await page.waitForTimeout(500);
+
+  // Navegar hasta el mes objetivo pulsando flechas.
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    header = await readHeader();
+    await debugLog("  date: iteration " + (attempt + 1) + " header=" + JSON.stringify(header));
+    if (!header) { await openCalendar(); continue; }
+    if (header.year === targetYear && header.month === targetMonth) break;
+    const ahead = header.year < targetYear || (header.year === targetYear && header.month < targetMonth);
+    const pressed = await pressArrow(ahead);
+    await debugLog("  date: arrow " + (ahead ? "next" : "prev") + " -> " + pressed);
+    if (!pressed) break;
+  }
+
+  // Elegir el dia.
+  header = await readHeader();
+  if (header && header.year === targetYear && header.month === targetMonth) {
+    const clicked = await clickDay(targetDay);
+    await debugLog("  date: clicked day " + targetDay + " -> " + clicked);
+    if (clicked) return true;
+  }
+
+  const clicked = await clickDay(targetDay);
+  await debugLog("  date: fallback click day=" + targetDay + " -> " + clicked);
+  if (!clicked) await dumpScheduleDiagnostics(page, "date-calendar");
+  await page.waitForTimeout(400);
   return clicked;
 }
 
@@ -2380,7 +2322,8 @@ async function waitForVideoProcessing(page, maxMs = 90000) {
     }
   };
 
-  const deadline = Date.now() + Math.max(60000, Number(maxMs) || 600000);
+  // // MARKER: TIKTOK-WAIT-10S-v1: maximo 10s esperando el escaneo; luego se continua.
+  const deadline = Date.now() + Math.min(Number(maxMs) || 10000, 10000);
   let waited = 0;
   while (Date.now() < deadline) {
     if (await isReady()) {
@@ -2394,7 +2337,7 @@ async function waitForVideoProcessing(page, maxMs = 90000) {
     }
   }
   console.log(
-    "TikTok: la verificacion sigue en curso; se CONTINUA igualmente con la programacion (no bloqueante)."
+    "TikTok: el escaneo sigue en curso; se CONTINUA igualmente con la programacion (no bloqueante)."
   );
   return false;
 }
@@ -2913,8 +2856,8 @@ async function openLoginContextForAccount(accountId) {
   return { context, alreadyOpen: false };
 }
 
-async function startLoginSession() {
-  const activeAccount = await getActiveAccount();
+async function startLoginSession(accountId) {
+  const activeAccount = accountId ? await requireAccount(accountId) : await getActiveAccount();
   const { context, alreadyOpen } = await openLoginContextForAccount(activeAccount.id);
   if (alreadyOpen) {
     return { ok: true, alreadyOpen: true };
@@ -2932,11 +2875,12 @@ async function startLoginSession() {
  */
 let loginLaunchState = { launching: false, error: "" };
 
-function startDashboardLoginSessionDetached() {
+function startDashboardLoginSessionDetached(accountId) {
+  // AISLAR-CUENTAS-TIKTOK: la ventana de login se abre en el perfil de LA CUENTA indicada.
   loginLaunchState = { launching: true, error: "" };
   void (async () => {
     try {
-      const activeAccount = await getActiveAccount();
+      const activeAccount = accountId ? await requireAccount(accountId) : await getActiveAccount();
       const { context, alreadyOpen } = await openLoginContextForAccount(activeAccount.id);
       if (alreadyOpen) { loginLaunchState = { launching: false, error: "" }; return; }
       const page = context.pages()[0] || (await context.newPage());
@@ -3171,12 +3115,14 @@ function getTempMailSetupStatus() {
   return { ...tempMailSetupState };
 }
 
-async function getLoginSessionStatus() {
-  const activeAccount = await getActiveAccount();
-  const saved = await hasSavedPlatformSession("tiktok", activeAccount.id);
+async function getLoginSessionStatus(accountId) {
+  // AISLAR-CUENTAS-TIKTOK: el estado de sesion es el de LA CUENTA indicada, no el global.
+  const target = accountId ? await requireAccount(accountId) : await getActiveAccount();
+  const saved = await hasSavedPlatformSession("tiktok", target.id);
   return {
-    open: Boolean(loginSessionContext) && loginSessionAccountId === activeAccount.id,
+    open: Boolean(loginSessionContext) && loginSessionAccountId === target.id,
     saved,
+    accountId: target.id,
     launching: loginLaunchState.launching,
     error: loginLaunchState.error,
   };

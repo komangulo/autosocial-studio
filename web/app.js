@@ -2541,6 +2541,17 @@ const UI = {
       if (action === "open") {
         await API.post("/api/account-manager/open-assisted", { accountId });
         await this.refresh();
+        return;
+      }
+      // MARKER: BOTON-ELIMINAR-CUENTA
+      if (action === "remove") {
+        const row = button.closest("tr");
+        const name = row ? (row.querySelector(".managed-account-name")?.textContent || accountId) : accountId;
+        const ok = confirm("¿Eliminar la cuenta \"" + name + "\"?\n\nSe borraran su cola de videos y sus perfiles de navegador (sesiones). No se puede deshacer.");
+        if (!ok) return;
+        const result = await API.post("/api/accounts/remove", { accountId });
+        if (result && result.ok === false) throw new Error(result.error);
+        await this.refresh();
       }
     } catch (error) {
       alert(`Account action failed: ${error.message}`);
@@ -2596,6 +2607,8 @@ const UI = {
             <td><div class="account-action-row">
               <button class="control-btn-small" data-account-action="select" data-account-id="${escapeHtml(account.id)}" ${isActive ? "disabled" : ""}>${isActive ? "Selected" : "Select"}</button>
               <button class="control-btn-small" data-account-action="open" data-account-id="${escapeHtml(account.id)}"><i class="ph ph-browser"></i> Open signup</button>
+              <!-- MARKER: BOTON-ELIMINAR-CUENTA -->
+              <button class="control-btn-small danger" data-account-action="remove" data-account-id="${escapeHtml(account.id)}" ${account.id === "default" ? "disabled title='La cuenta por defecto no se puede eliminar.'" : "title='Eliminar esta cuenta, su cola y sus perfiles.'"}><i class="ph ph-trash"></i> Eliminar</button>
             </div></td>
           </tr>`;
       }).join("")

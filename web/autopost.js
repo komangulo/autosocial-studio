@@ -68,11 +68,33 @@
     return Boolean(els.aiGenerated?.checked);
   }
 
+  // AISLAR-CUENTAS-TIKTOK: la cuenta que se usa en TikTok es SIEMPRE la seleccionada.   
+  const ACCOUNT_KEY = "autosocial.selectedAccountId";
+  let selectedAccountId = "";
+  function setSelectedAccountId(id) {
+    selectedAccountId = id || "";
+    try { if (id) localStorage.setItem(ACCOUNT_KEY, id); } catch { /* ignore */ }
+  }
+  function currentAccountId() {
+    return selectedAccountId || "";
+  }
+  function withAccount(payload = {}) {
+    const id = currentAccountId();
+    return id ? { ...payload, accountId: id } : payload;
+  }
+
+  // PROGRAMAR-TIKTOK-CUENTA: cuenta activa (la del desplegable). Fuente: el backend.
+  let tiktokAccountId = "";
+  function withAccountForTikTok(payload = {}) {
+    return tiktokAccountId ? { ...payload, accountId: tiktokAccountId } : payload;
+  }
+
   async function refreshAccount() {
     try {
       const data = await API.get("/api/accounts");
       const account = data?.activeAccount;
       if (account?.id) {
+        if (!currentAccountId()) setSelectedAccountId(account.id);
         els.accountBadge.textContent = account.name || account.id;
         els.accountBadge.classList.add("active");
       } else {
@@ -130,7 +152,7 @@
     if (!folder) { setMessage("Escribe o elige la carpeta de vídeos.", "error"); return; }
     els.previewBtn.disabled = true;
     try {
-      const data = await API.post("/api/autoclone/schedule/preview", {
+      const data = await API.post("/api/autoclone/schedule/preview", withAccount({
         folder,
         days: selectedDays(),
         times: selectedTimes(),
@@ -139,7 +161,7 @@
         hashtags: selectedHashtags(),
         location: selectedLocation(),
         aiGenerated: isAiGenerated(),
-      });
+      }));
       renderPlan(data.plan);
       const extras = [];
       if (data.location) extras.push(`localización «${data.location}»`);
@@ -162,7 +184,7 @@
     els.scheduleBtn.disabled = true;
     setMessage("Programando…");
     try {
-      const data = await API.post("/api/autoclone/schedule", {
+      const data = await API.post("/api/autoclone/schedule", withAccount({
         folder,
         days,
         times: selectedTimes(),
@@ -172,7 +194,7 @@
         hashtags: selectedHashtags(),
         location: selectedLocation(),
         aiGenerated: isAiGenerated(),
-      });
+      }));
       renderPlan((data.created || []).map((c) => ({ videoName: c.videoName, local: c.local })));
       const ok = data.created.filter((c) => c.jobId).length;
       setMessage(`Programados ${ok} de ${data.total} vídeos. Se publicarán solos en TikTok.`, "ok");
@@ -187,7 +209,8 @@
 
   async function checkLoginStatus(silent = false) {
     try {
-      const data = await API.get("/api/tiktok/login/status");
+      const id = currentAccountId();
+      const data = await API.get("/api/tiktok/login/status" + (id ? `?accountId=${encodeURIComponent(id)}` : ""));
       const open = Boolean(data?.open);
       const saved = Boolean(data?.saved);
       const launching = Boolean(data?.launching);
@@ -250,7 +273,7 @@
     if (els.loginTitle) els.loginTitle.textContent = "Sesión de TikTok";
     if (els.loginMessage) els.loginMessage.textContent = "Abriendo Chromium… espera unos segundos.";
     try {
-      await API.post("/api/tiktok/login", {});
+      await API.post("/api/tiktok/login", withAccount({}));
       pollLoginUntilSettled();
     } catch (error) {
       if (els.loginMessage) els.loginMessage.textContent = error.message;
@@ -308,7 +331,7 @@
     els.startBtn.disabled = true;
     setMessage("Iniciando… la app irá subiendo y programando cada vídeo en TikTok uno detrás de otro.");
     try {
-      const data = await API.post("/api/autoclone/schedule/start", {
+      const data = await API.post("/api/autoclone/schedule/start", withAccount({
         folder,
         days,
         times: selectedTimes(),
@@ -318,7 +341,7 @@
         hashtags: selectedHashtags(),
         location: selectedLocation(),
         aiGenerated: isAiGenerated(),
-      });
+      }));
       renderStartProgress(data?.run);
       if (startPollTimer) clearInterval(startPollTimer);
       startPollTimer = setInterval(async () => {
@@ -445,6 +468,15 @@
   els.locationCustom?.addEventListener("input", savePostOptions);
   els.aiGenerated?.addEventListener("change", savePostOptions);
   restorePostOptions();
+
+  document.addEventListener("autosocial:accountchange", (event) => {
+    const id = event?.detail?.accountId || "";
+    if (id) setSelectedAccountId(id);
+    refreshAccount();
+    checkLoginStatus(true);
+  });
+
+  document.addEventListener("autosocial:accountchange", () => { refreshAccount(); });
 
   document.addEventListener("autosocial:viewchange", (event) => {
     if (event.detail?.viewName === "tiktok") {

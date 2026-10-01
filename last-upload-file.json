@@ -1,17 +1,17 @@
 {
-  "jobId": "0e0ea172-f817-4e75-826b-e82a148bedf2",
-  "videoName": "2026-09-17_7686474285086477588.mp4",
-  "path": "C:\\Users\\msi\\Downloads\\autosocial-studio\\queue\\reviews\\tiktok\\processing\\0e0ea172-f817-4e75-826b-e82a148bedf2\\2026-09-17_7686474285086477588.mp4",
+  "jobId": "dd9867b6-c1be-4d68-b3f2-c63d88650fe9",
+  "videoName": "7689848360269827358_unique.mp4",
+  "path": "C:\\Users\\msi\\Downloads\\autosocial-studio\\queue\\amo-dominante\\tiktok\\processing\\dd9867b6-c1be-4d68-b3f2-c63d88650fe9\\7689848360269827358_unique.mp4",
   "sourceFingerprint": {
-    "sizeBytes": 4802188,
-    "sha256": "81d4df5595db799e7df8f5774f559120a96d4d2bcda05a37e7fa59e44f924eec"
+    "sizeBytes": 2340717,
+    "sha256": "09dbb565f980dc7a8e48fcab55ad5b68d6a068730794323672cd85fb5c36399c"
   },
   "reservedFingerprint": {
-    "sizeBytes": 4802188,
-    "sha256": "81d4df5595db799e7df8f5774f559120a96d4d2bcda05a37e7fa59e44f924eec"
+    "sizeBytes": 2340717,
+    "sha256": "09dbb565f980dc7a8e48fcab55ad5b68d6a068730794323672cd85fb5c36399c"
   },
   "uploadFingerprint": {
-    "sizeBytes": 4802188,
-    "sha256": "81d4df5595db799e7df8f5774f559120a96d4d2bcda05a37e7fa59e44f924eec"
+    "sizeBytes": 2340717,
+    "sha256": "09dbb565f980dc7a8e48fcab55ad5b68d6a068730794323672cd85fb5c36399c"
   }
 }
