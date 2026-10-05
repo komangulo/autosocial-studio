@@ -1,0 +1,70 @@
+Auto Clone — metadatos por vídeo + sin subcarpetas
+==================================================
+
+Qué cambia
+----------
+
+1) Cada vídeo tiene su propio .meta.json con SIEMPRE estos campos:
+
+     {
+       "description": "...",
+       "caption": "...",
+       "uploadedAt": "...",
+       "downloadIndex": N
+     }
+
+   - uploadedAt siempre existe. Si TikTok no da fecha (upload_date/timestamp),
+     se usa la fecha del propio archivo descargado.
+   - downloadIndex solo aparece cuando el vídeo forma parte de un lote.
+
+2) Todos los vídeos del mismo usuario se quedan en LA MISMA carpeta.
+   Ya NO se crea una subcarpeta "posted" al publicar. El vídeo se copia a la
+   cola interna de TikTok para subirlo, pero el original se queda donde está.
+   (Da igual si usas karaoke amarillo-sobre-negro: la carpeta es la misma.)
+
+3) Bonus: se añade el fixture test/fixtures/tiny.mp4 que faltaba, y se ajusta
+   .gitignore para poder versionarlo. Esto es lo que tenía la CI en rojo.
+
+
+Cómo instalarlo
+---------------
+
+Opción A — con el parche (recomendado). Desde la raíz del proyecto:
+
+    git apply autoclone-meta-y-carpetas.patch
+
+Si falla:
+
+    git apply --3way autoclone-meta-y-carpetas.patch
+
+Después, añade el fixture (el parche no incluye binarios):
+
+    (copia test/fixtures/tiny.mp4 de este ZIP a test/fixtures/)
+
+
+Opción B — copiando archivos a mano. Reemplaza en tu proyecto:
+
+    .gitignore
+    src/video-meta.js
+    src/queue.js
+    src/autoclone/controller.js
+    src/autoclone/index.js
+    src/autoclone/scheduler.js
+    test/video-meta.test.js
+    test/autoclone.test.js
+    test/fixtures/tiny.mp4
+
+
+Verificar
+---------
+
+    node --test test/video-meta.test.js
+    node --test test/autoclone.test.js
+
+Debe terminar en "# fail 0" en ambos.
+
+Subir a GitHub:
+
+    git add -A
+    git commit -m "Meta.json por video con uploadedAt y salida sin subcarpetas"
+    git push

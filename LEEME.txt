@@ -1,0 +1,72 @@
+Auto Clone — fix: traducción de metadatos con xKiro + sin subcarpetas
+=====================================================================
+
+Qué arregla esta versión
+------------------------
+
+1) TRADUCCIÓN DE LOS .meta.json CON xKiro
+   Antes, la traducción del .meta.json (descripción) solo usaba Gemini u
+   OpenRouter. Si tu única clave configurada era xKiro, la app no traducía
+   NADA y además fallaba en silencio (sin avisar).
+
+   Ahora:
+   - Se usa xKiro como proveedor principal (https://api.xkiro.com/v1).
+   - Si un modelo de xKiro no responde (por ejemplo 503 del tier gratis),
+     se prueba automáticamente con otro modelo de respaldo. Así la
+     traducción no se cae cuando un modelo gratuito está saturado.
+   - Si no hay ninguna clave configurada, se avisa claramente en el registro:
+     "Sin API key de IA: no se pudo traducir el .meta.json."
+   - Se sigue traduciendo SOLO la descripción. El título se descarta.
+
+2) CADA VÍDEO TIENE SU .meta.json
+   El archivo lleva: description, caption, uploadedAt y downloadIndex.
+   uploadedAt siempre está presente: usa la fecha de TikTok si existe y, si
+   no, la fecha del propio archivo. La traducción no lo borra.
+
+3) SIN SUBCARPETAS POR VÍDEO
+   En ".runtime/autoclone/jobs/<job>/work/" ya no se acumula una carpeta por
+   vídeo: la carpeta temporal de cada vídeo se borra al terminar (incluso si
+   falla) y la carpeta "work" entera se borra al acabar el trabajo.
+   Los vídeos finales y sus .meta.json quedan juntos en la carpeta destino.
+
+
+Cómo se instala
+---------------
+
+Copia estos archivos sobre tu proyecto (reemplazando):
+
+    .gitignore
+    src/video-meta.js
+    src/queue.js
+    src/autoclone/controller.js
+    src/autoclone/index.js
+    src/autoclone/scheduler.js
+    test/video-meta.test.js
+    test/autoclone.test.js
+    test/fixtures/tiny.mp4
+
+Ruta del proyecto (tu PC):
+
+    C:\Users\msi\Downloads\autosocial-studio
+
+
+Configuración
+-------------
+
+Para que traduzca, en Ajustes debe haber una clave de xKiro configurada
+(la misma que ya usas para el texto en pantalla). No hace falta tocar nada
+más: el módulo de metadatos reutiliza esa clave.
+
+La clave se lee de (en este orden):
+    - Ajustes de la app (campo xKiro)
+    - Variable de entorno XKIRO_API_KEY
+
+
+Verificar
+---------
+
+    node --test test/video-meta.test.js
+    node --test test/autoclone.test.js
+
+Debe terminar en "# fail 0" en ambos.
+(video-meta: 11 pruebas. autoclone: 37 pruebas.)

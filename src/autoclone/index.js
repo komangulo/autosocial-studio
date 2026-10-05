@@ -266,6 +266,7 @@ function createAutoCloneRouter(express, context = {}) {
       location,
       aiGenerated,
       worker: context.worker,
+      keepInPlace: true,
     });
     lastSchedule = { at: new Date().toISOString(), ...result, accountId: active.id };
     res.json({ ok: true, ...result, accountId: active.id });
@@ -334,6 +335,7 @@ function createAutoCloneRouter(express, context = {}) {
            aiGenerated,
            worker: context.worker,
            deferArchive: true,
+           keepInPlace: true,
            onProgress: (progress) => {
             run.current = progress.current || run.current;
             run.total = progress.total || run.total;
@@ -366,6 +368,7 @@ function createAutoCloneRouter(express, context = {}) {
           folder,
           created: result.created,
           worker: context.worker,
+          keepInPlace: true,
         });
         run.published = finalized.published;
         run.failed = (run.failed || 0) + finalized.failed;

@@ -3,6 +3,7 @@ const os = require("os");
 const fs = require("fs/promises");
 const { spawn } = require("child_process");
 const express = require("express");
+const { createTikTokWarmer } = require("./tiktok-warmer"); // WARMER-TIKTOK
 const { config } = require("./config");
 const { ensureDirectories } = require("./fs-utils");
 const { UniquifierController } = require("./uniquifier-controller");
@@ -46,7 +47,21 @@ const {
   requireAccount,
   hasSavedPlatformSession,
   removeAccount, // MARKER: BOTON-ELIMINAR-CUENTA
-} = require("./account-manager");
+} = require("./account-manager");// WARMER-TIKTOK: motor de calentamiento (abre el perfil de TikTok y baja videos).// WARMER-TIKTOK: motor de calentamiento (abre el perfil de TikTok y baja videos).// WARMER-TIKTOK: motor de calentamiento (abre el perfil de TikTok y baja videos).// WARMER-TIKTOK: motor de calentamiento (abre el perfil de TikTok y baja videos).// WARMER-TIKTOK: motor de calentamiento (abre el perfil de TikTok y baja videos).
+const tiktokWarmer = createTikTokWarmer_instance();
+function createTikTokWarmer_instance() {
+  try {
+    // El calentador se autoabastece: solo le pasamos lo que EXISTA aqui,
+    // asi no depende de nombres internos que puedan variar en el proyecto.
+    const deps = {};
+    if (typeof getPlatformProfileDir === "function") deps.getPlatformProfileDir = getPlatformProfileDir;
+    if (typeof requireAccount === "function") deps.requireAccount = requireAccount;
+    return createTikTokWarmer(deps);
+  } catch (error) {
+    console.error("[WARMER-TIKTOK] no se pudo crear el calentador:", error.message);
+    return { start: async () => ({ ok: false, error: error.message }), stop: async () => ({ ok: false }), status: () => ({ running: false }), list: () => [], stopAll: () => ({ ok: true }) };
+  }
+}
 const { accountVault, generateTikTokPassword } = require("./account-vault");
 const googleFlow = require("./google-flow");
 const { getFlowConfig, saveFlowConfig } = require("./flow-config");
@@ -978,6 +993,47 @@ async function createServer() {
     catch (error) { res.status(400).json({ ok: false, error: error.message }); }
   });
 
+  // WARMER-TIKTOK: resuelve la cuenta a calentar sin depender de imports concretos.
+  const resolveWarmAccount = async (id) => {
+    if (id && typeof requireAccount === "function") return await requireAccount(id);
+    if (id) return { id, name: id };
+    if (typeof getActiveAccount === "function") return await getActiveAccount();
+    throw new Error("Elige una cuenta de TikTok en el desplegable.");
+  };
+
+  // WARMER-TIKTOK: arranca el auto-scroll (calentamiento) de UNA cuenta.
+  app.post("/api/tiktok/warm/start", async (req, res) => {
+    try {
+      const account = await resolveWarmAccount(req.body?.accountId || req.query?.accountId);
+      const result = await tiktokWarmer.start(account.id, {
+        scrollMs: Number(req.body?.scrollMs) || undefined,
+        headless: req.body?.headless === true,
+      });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  // WARMER-TIKTOK: para el auto-scroll de UNA cuenta.
+  app.post("/api/tiktok/warm/stop", async (req, res) => {
+    try {
+      const accountId = req.body?.accountId || req.query?.accountId;
+      res.json(tiktokWarmer.stop(accountId));
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  // WARMER-TIKTOK: estado del auto-scroll (cuenta concreta o todas).
+  app.get("/api/tiktok/warm/status", async (req, res) => {
+    try {
+      const accountId = req.query?.accountId || req.body?.accountId;
+      res.json(accountId ? tiktokWarmer.status(accountId) : { running: tiktokWarmer.list() });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
   // Login endpoints (TikTok)
 
   // AISLAR-CUENTAS-TIKTOK: estos endpoints respetan la cuenta seleccionada (?accountId / body)   

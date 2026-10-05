@@ -80,8 +80,12 @@ async function readVideoMeta(videoPath) {
     // El caption SIEMPRE se regenera desde la description: los sidecars
     // antiguos traen un caption con el titulo truncado duplicado.
     const caption = buildCaptionFromMeta({ description });
-    const downloadIndex = Number.isInteger(data.downloadIndex) ? data.downloadIndex : null;
-    return { description, caption, downloadIndex };
+    const meta = { description, caption };
+    // Se conserva uploadedAt (y downloadIndex solo cuando existe) para no
+    // perder campos al reescribir el sidecar.
+    if (typeof data.uploadedAt === "string" && data.uploadedAt) meta.uploadedAt = data.uploadedAt;
+    if (Number.isInteger(data.downloadIndex)) meta.downloadIndex = data.downloadIndex;
+    return meta;
   } catch {
     return null;
   }

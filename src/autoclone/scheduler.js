@@ -168,7 +168,7 @@ function buildPlan(videos, slots) {
  *   worker: AutonomousWorker instance, deferArchive? (manual AutoPost run)
  *   onProgress({ current, total, videoName, at })
  */
-async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false } = {}) {
+async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false, keepInPlace = true } = {}) {
   if (!worker) throw new Error("Falta el trabajador autonomo de TikTok.");
   const sourceDir = path.resolve(String(folder || ""));
   let files = Array.isArray(videos) && videos.length ? videos : await listVideos(sourceDir);
@@ -197,7 +197,7 @@ async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRu
   if (!slots.length) throw new Error("No se pudo calcular ninguna fecha futura con esos dias y horas.");
 
   const created = [];
-  const sentDir = resolvePostedDir(sourceDir);
+  const sentDir = keepInPlace ? sourceDir : resolvePostedDir(sourceDir);
   for (let index = 0; index < files.length && index < slots.length; index += 1) {
     const source = path.resolve(files[index]);
     const slot = slots[index];
@@ -263,7 +263,8 @@ async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRu
 
        // For the manual AutoPost button, archive the original only after the
        // worker reports whether TikTok accepted or rejected the upload.
-       if (!deferArchive) await moveToSent(source, sentDir);
+       // Con keepInPlace los videos se quedan en la misma carpeta, sin "posted".
+       if (!deferArchive && !keepInPlace) await moveToSent(source, sentDir);
 
        created.push({ jobId: job.id, videoName, sourcePath: source, at: slot.at, local: slot.local, label: slot.label });
       await onProgress?.({ current: index + 1, total: files.length, videoName, at: slot.at, label: slot.label });
@@ -365,11 +366,11 @@ async function waitForScheduleJobs({ created = [], worker, timeoutMs = 900_000, 
 }
 
 /** Archive manual AutoPost sources only after the real TikTok result exists. */
-async function finalizeSchedule({ accountId, folder, created, worker } = {}) {
+async function finalizeSchedule({ accountId, folder, created, worker, keepInPlace = true } = {}) {
   const sourceDir = path.resolve(String(folder || ""));
   const state = await readPostingState(accountId, sourceDir);
-  const sentDir = resolvePostedDir(sourceDir);
-  const failedDir = resolveFailedDir(sourceDir);
+  const sentDir = keepInPlace ? sourceDir : resolvePostedDir(sourceDir);
+  const failedDir = keepInPlace ? sourceDir : resolveFailedDir(sourceDir);
   const result = { published: 0, failed: 0, pending: 0, sentDir, failedDir };
 
   for (const item of created || []) {
@@ -379,14 +380,15 @@ async function finalizeSchedule({ accountId, folder, created, worker } = {}) {
       continue;
     }
     if (job.status === "succeeded") {
-      const archivedPath = await moveToSent(item.sourcePath, sentDir);
+      const archivedPath = keepInPlace ? item.sourcePath : await moveToSent(item.sourcePath, sentDir);
       state.lastPublishedName = item.videoName;
       state.lastPublishedAt = new Date().toISOString();
       state.failedNames = (state.failedNames || []).filter((name) => name !== item.videoName);
       result.published += 1;
       result.lastArchivedPath = archivedPath;
     } else if (["failed", "uncertain"].includes(job.status)) {
-      await moveToFailed(item.sourcePath, failedDir);
+      // Con keepInPlace el video se queda en su carpeta; el estado ya evita reenviarlo.
+      if (!keepInPlace) await moveToFailed(item.sourcePath, failedDir);
       state.failedNames = [...(state.failedNames || []), item.videoName];
       result.failed += 1;
     } else if (job.status === "cancelled") {

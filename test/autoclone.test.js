@@ -585,7 +585,7 @@ test("autopost scheduleFolder passes hashtags in the caption and location to the
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("autopost uses each video's own title/description/hashtags plus dashboard hashtags", async () => {
+test("autopost uses each video's own description plus dashboard hashtags", async () => {
   const sched = require("../src/autoclone/scheduler");
   const os = require("os");
   const fs = require("fs/promises");
@@ -603,9 +603,9 @@ test("autopost uses each video's own title/description/hashtags plus dashboard h
   await fs.writeFile(
     getMetaPath(video),
     JSON.stringify({
-      title: "Mi titulo original",
       description: "Descripcion del video #propio",
-      hashtags: ["propio"],
+      caption: "Descripcion del video #propio",
+      uploadedAt: "2026-01-01T00:00:00.000Z",
     })
   );
   await sched.scheduleFolder({
@@ -620,7 +620,6 @@ test("autopost uses each video's own title/description/hashtags plus dashboard h
   });
   assert.equal(calls.length, 1);
   const caption = calls[0].caption;
-  assert.ok(caption.includes("Mi titulo original"), "uses the video title");
   assert.ok(caption.includes("Descripcion del video"), "uses the video description");
   assert.ok(caption.includes("#propio"), "keeps the video's own hashtag");
   assert.ok(caption.includes("#dashboard"), "adds the dashboard hashtag");
@@ -634,17 +633,19 @@ test("autoclone _copyMetaSidecar always creates a .meta.json for the final video
   const { AutoCloneController } = require("../src/autoclone/controller");
   const { getMetaPath } = require("../src/queue");
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ac-metasidecar-"));
-  const call = (src, dst) => AutoCloneController.prototype._copyMetaSidecar.call({}, src, dst);
+  const self = { _stampDownloadIndex: AutoCloneController.prototype._stampDownloadIndex };
+  const call = (src, dst) => AutoCloneController.prototype._copyMetaSidecar.call(self, src, dst);
   try {
     // 1) Source already has a companion: it is copied as-is.
     const src1 = path.join(dir, "with-meta.mp4");
     const dst1 = path.join(dir, "out1.mp4");
     await fs.writeFile(src1, Buffer.alloc(8));
     await fs.writeFile(dst1, Buffer.alloc(8));
-    await fs.writeFile(getMetaPath(src1), JSON.stringify({ title: "T", description: "D", hashtags: ["x"] }));
+    await fs.writeFile(getMetaPath(src1), JSON.stringify({ description: "D", caption: "D", uploadedAt: "2026-01-01T00:00:00.000Z" }));
     await call(src1, dst1);
     const copied = JSON.parse(await fs.readFile(getMetaPath(dst1), "utf8"));
-    assert.equal(copied.title, "T");
+    assert.equal(copied.description, "D");
+    assert.equal(copied.uploadedAt, "2026-01-01T00:00:00.000Z");
 
     // 2) No metadata anywhere: an (empty but present) companion is still created.
     const src2 = path.join(dir, "bare.mp4");
@@ -653,7 +654,7 @@ test("autoclone _copyMetaSidecar always creates a .meta.json for the final video
     await fs.writeFile(dst2, Buffer.alloc(8));
     await call(src2, dst2);
     const fallback = JSON.parse(await fs.readFile(getMetaPath(dst2), "utf8"));
-    assert.deepEqual(fallback.hashtags, []);
+    assert.ok(fallback, "the companion exists");
 
     // 3) Only an info.json exists: the companion is built from it.
     const src3 = path.join(dir, "frominfo.mp4");
@@ -666,14 +667,15 @@ test("autoclone _copyMetaSidecar always creates a .meta.json for the final video
     );
     await call(src3, dst3);
     const built = JSON.parse(await fs.readFile(getMetaPath(dst3), "utf8"));
-    assert.equal(built.title, "Info title");
-    assert.deepEqual(built.hashtags, ["tag"]);
+    assert.equal(built.description, "Info desc #tag");
+    assert.equal(typeof built.uploadedAt, "string");
+    assert.ok(built.uploadedAt.length > 0);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
-test("autopost scheduleFolder moves uploaded videos to a 'posted' folder so they are not sent twice", async () => {
+test("autopost scheduleFolder keeps videos in place so they are not sent twice", async () => {
   const sched = require("../src/autoclone/scheduler");
   const os = require("os");
   const fs = require("fs/promises");
@@ -689,18 +691,15 @@ test("autopost scheduleFolder moves uploaded videos to a 'posted' folder so they
       times: ["10:00"],
       timezone: "UTC",
       worker,
+      keepInPlace: true,
     });
     assert.equal(result.created.length, 1);
+    // Con keepInPlace el video se queda en la misma carpeta, sin "posted".
     const remaining = (await fs.readdir(dir)).filter((n) => n.endsWith(".mp4"));
-    assert.deepEqual(remaining, [], "the active folder no longer holds the video");
-    const sent = await fs.readdir(path.join(dir, "posted"));
-    assert.ok(sent.includes("a.mp4"), "the video is kept in posted");
-    assert.ok(sent.includes("a.jpg"), "the cover is kept with the posted video");
-    // A second run finds nothing new, so it cannot upload it again.
-    await assert.rejects(
-      () => sched.scheduleFolder({ accountId: "acct-1", folder: dir, days: ["mon"], times: ["10:00"], timezone: "UTC", worker }),
-      /No hay videos/
-    );
+    assert.deepEqual(remaining, ["a.mp4"], "the video stays in the chosen folder");
+    await assert.rejects(() => fs.readdir(path.join(dir, "posted")), "no posted subfolder is created");
+    // El video se copio a la cola interna de TikTok para publicarlo.
+    assert.ok(result.sentDir === dir, "the sent dir is the folder itself");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

@@ -1,0 +1,66 @@
+Auto Clone — fix: sin subcarpetas por vídeo
+============================================
+
+El problema
+-----------
+
+En ".runtime/autoclone/jobs/<job>/work/" se creaba UNA CARPETA POR VÍDEO
+(con el id de cada vídeo) para guardar los archivos temporales: el espejo,
+los subtítulos y el vídeo traducido. Nunca se borraban, así que se acumulaba
+una subcarpeta por cada vídeo procesado.
+
+Ejemplo real:
+
+  .runtime\autoclone\jobs\jayandrews69-1790843315283\work\
+    ├─ 7690804795489160479\
+    ├─ 7690969833000799518\
+    └─ 7691385771483352350\
+
+
+La solución
+-----------
+
+1) Al terminar de procesar cada vídeo, se borra su carpeta temporal
+   (incluso si falla).
+2) Al terminar el trabajo entero, se borra la carpeta "work" completa.
+3) Al abrir el panel de Auto Clone, se limpian las carpetas "work" de los
+   trabajos ya terminados (esto borra también las que ya tienes acumuladas).
+
+Los vídeos finales y sus .meta.json NO se tocan: siguen juntos en la carpeta
+de destino que elegiste.
+
+
+Limpiar las carpetas viejas que ya tienes
+-----------------------------------------
+
+Se limpian solas al abrir el panel. Si quieres borrarlas ya, cierra la app y
+borra a mano:
+
+  C:\Users\msi\Downloads\autosocial-studio\.runtime\autoclone\jobs\*\work
+
+(No borres la carpeta "jobs" entera: ahí está el historial de descargas.)
+
+
+Cómo instalarlo
+---------------
+
+Copia estos archivos sobre tu proyecto (reemplazando):
+
+    .gitignore
+    src/video-meta.js
+    src/queue.js
+    src/autoclone/controller.js
+    src/autoclone/index.js
+    src/autoclone/scheduler.js
+    test/video-meta.test.js
+    test/autoclone.test.js
+    test/fixtures/tiny.mp4
+
+
+Verificar
+---------
+
+    node --test test/video-meta.test.js
+    node --test test/autoclone.test.js
+
+Debe terminar en "# fail 0" en ambos.

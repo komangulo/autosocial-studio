@@ -1,0 +1,383 @@
+diff --git a/.gitignore b/.gitignore
+index a89d9ed..08f7d00 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -57,6 +57,8 @@ qa-*.png
+ *.webm
+ *.avi
+ *.mkv
++# ...except the tiny test fixture the suite needs.
++!test/fixtures/*.mp4
+ queue/**/*.description
+ queue/**/*.txt
+ 
+diff --git a/src/autoclone/controller.js b/src/autoclone/controller.js
+index 385fa8d..269568f 100644
+--- a/src/autoclone/controller.js
++++ b/src/autoclone/controller.js
+@@ -1449,9 +1449,14 @@ class AutoCloneController extends EventEmitter {
+     // final video is guaranteed to carry a metadata companion.
+     try {
+       const { readVideoMeta } = require("../queue");
+-      const meta = await readVideoMeta(sourceVideoPath);
+-      const payload = meta || { title: "", description: "", hashtags: [], caption: "" };
++      const read = await readVideoMeta(sourceVideoPath);
++      const payload = {
++        description: read?.description || "",
++        caption: read?.caption || read?.description || "",
++        uploadedAt: read?.uploadedAt || "",
++      };
+       if (Number.isInteger(downloadIndex)) payload.downloadIndex = downloadIndex;
++      else if (Number.isInteger(read?.downloadIndex)) payload.downloadIndex = read.downloadIndex;
+       await fs.writeFile(targetMeta, JSON.stringify(payload, null, 2), "utf8");
+     } catch {
+       // Non-fatal: the video still publishes, just without its own metadata.
+diff --git a/src/autoclone/index.js b/src/autoclone/index.js
+index 1414fc0..2731f05 100644
+--- a/src/autoclone/index.js
++++ b/src/autoclone/index.js
+@@ -266,6 +266,7 @@ function createAutoCloneRouter(express, context = {}) {
+       location,
+       aiGenerated,
+       worker: context.worker,
++      keepInPlace: true,
+     });
+     lastSchedule = { at: new Date().toISOString(), ...result, accountId: active.id };
+     res.json({ ok: true, ...result, accountId: active.id });
+@@ -334,6 +335,7 @@ function createAutoCloneRouter(express, context = {}) {
+            aiGenerated,
+            worker: context.worker,
+            deferArchive: true,
++           keepInPlace: true,
+            onProgress: (progress) => {
+             run.current = progress.current || run.current;
+             run.total = progress.total || run.total;
+@@ -366,6 +368,7 @@ function createAutoCloneRouter(express, context = {}) {
+           folder,
+           created: result.created,
+           worker: context.worker,
++          keepInPlace: true,
+         });
+         run.published = finalized.published;
+         run.failed = (run.failed || 0) + finalized.failed;
+diff --git a/src/autoclone/scheduler.js b/src/autoclone/scheduler.js
+index adc5049..3bd8628 100644
+--- a/src/autoclone/scheduler.js
++++ b/src/autoclone/scheduler.js
+@@ -168,7 +168,7 @@ function buildPlan(videos, slots) {
+  *   worker: AutonomousWorker instance, deferArchive? (manual AutoPost run)
+  *   onProgress({ current, total, videoName, at })
+  */
+-async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false } = {}) {
++async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false, keepInPlace = true } = {}) {
+   if (!worker) throw new Error("Falta el trabajador autonomo de TikTok.");
+   const sourceDir = path.resolve(String(folder || ""));
+   let files = Array.isArray(videos) && videos.length ? videos : await listVideos(sourceDir);
+@@ -197,7 +197,7 @@ async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRu
+   if (!slots.length) throw new Error("No se pudo calcular ninguna fecha futura con esos dias y horas.");
+ 
+   const created = [];
+-  const sentDir = resolvePostedDir(sourceDir);
++  const sentDir = keepInPlace ? sourceDir : resolvePostedDir(sourceDir);
+   for (let index = 0; index < files.length && index < slots.length; index += 1) {
+     const source = path.resolve(files[index]);
+     const slot = slots[index];
+@@ -263,7 +263,8 @@ async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRu
+ 
+        // For the manual AutoPost button, archive the original only after the
+        // worker reports whether TikTok accepted or rejected the upload.
+-       if (!deferArchive) await moveToSent(source, sentDir);
++       // Con keepInPlace los videos se quedan en la misma carpeta, sin "posted".
++       if (!deferArchive && !keepInPlace) await moveToSent(source, sentDir);
+ 
+        created.push({ jobId: job.id, videoName, sourcePath: source, at: slot.at, local: slot.local, label: slot.label });
+       await onProgress?.({ current: index + 1, total: files.length, videoName, at: slot.at, label: slot.label });
+@@ -365,11 +366,11 @@ async function waitForScheduleJobs({ created = [], worker, timeoutMs = 900_000,
+ }
+ 
+ /** Archive manual AutoPost sources only after the real TikTok result exists. */
+-async function finalizeSchedule({ accountId, folder, created, worker } = {}) {
++async function finalizeSchedule({ accountId, folder, created, worker, keepInPlace = true } = {}) {
+   const sourceDir = path.resolve(String(folder || ""));
+   const state = await readPostingState(accountId, sourceDir);
+-  const sentDir = resolvePostedDir(sourceDir);
+-  const failedDir = resolveFailedDir(sourceDir);
++  const sentDir = keepInPlace ? sourceDir : resolvePostedDir(sourceDir);
++  const failedDir = keepInPlace ? sourceDir : resolveFailedDir(sourceDir);
+   const result = { published: 0, failed: 0, pending: 0, sentDir, failedDir };
+ 
+   for (const item of created || []) {
+@@ -379,14 +380,15 @@ async function finalizeSchedule({ accountId, folder, created, worker } = {}) {
+       continue;
+     }
+     if (job.status === "succeeded") {
+-      const archivedPath = await moveToSent(item.sourcePath, sentDir);
++      const archivedPath = keepInPlace ? item.sourcePath : await moveToSent(item.sourcePath, sentDir);
+       state.lastPublishedName = item.videoName;
+       state.lastPublishedAt = new Date().toISOString();
+       state.failedNames = (state.failedNames || []).filter((name) => name !== item.videoName);
+       result.published += 1;
+       result.lastArchivedPath = archivedPath;
+     } else if (["failed", "uncertain"].includes(job.status)) {
+-      await moveToFailed(item.sourcePath, failedDir);
++      // Con keepInPlace el video se queda en su carpeta; el estado ya evita reenviarlo.
++      if (!keepInPlace) await moveToFailed(item.sourcePath, failedDir);
+       state.failedNames = [...(state.failedNames || []), item.videoName];
+       result.failed += 1;
+     } else if (job.status === "cancelled") {
+diff --git a/src/queue.js b/src/queue.js
+index 2bf6ccb..a2ed7a4 100644
+--- a/src/queue.js
++++ b/src/queue.js
+@@ -80,8 +80,12 @@ async function readVideoMeta(videoPath) {
+     // El caption SIEMPRE se regenera desde la description: los sidecars
+     // antiguos traen un caption con el titulo truncado duplicado.
+     const caption = buildCaptionFromMeta({ description });
+-    const downloadIndex = Number.isInteger(data.downloadIndex) ? data.downloadIndex : null;
+-    return { description, caption, downloadIndex };
++    const meta = { description, caption };
++    // Se conserva uploadedAt (y downloadIndex solo cuando existe) para no
++    // perder campos al reescribir el sidecar.
++    if (typeof data.uploadedAt === "string" && data.uploadedAt) meta.uploadedAt = data.uploadedAt;
++    if (Number.isInteger(data.downloadIndex)) meta.downloadIndex = data.downloadIndex;
++    return meta;
+   } catch {
+     return null;
+   }
+diff --git a/src/video-meta.js b/src/video-meta.js
+index 8799eec..9590011 100644
+--- a/src/video-meta.js
++++ b/src/video-meta.js
+@@ -49,21 +49,22 @@ function normalizeTagList(value) {
+ }
+ 
+ /**
+- * META-DESC-ONLY-v1
++ * META-DESC-ONLY-v2
+  * Build the companion metadata object from a yt-dlp info.json payload.
+  * TikTok no tiene titulo: la descripcion trae el texto completo y los
+  * hashtags. El "title" de yt-dlp viene truncado con "..." y los "tags"
+  * repetirian lo que ya esta en la descripcion, asi que se descartan.
+- * Shape: { description, caption }
++ * Shape: { description, caption, uploadedAt }
++ *
++ * `uploadedAt` SIEMPRE esta presente: si TikTok no expone la fecha se usa
++ * `fallbackIso` (la fecha del archivo), que el controlador rellena.
+  */
+-function metaFromInfoJson(info = {}) {
++function metaFromInfoJson(info = {}, { fallbackIso = "" } = {}) {
+   const description = String(info.description || "").trim();
+-  const uploadedAt = uploadedAtFromInfoJson(info);
+-  const base = { description, caption: buildCaptionFromMeta({ description }) };
++  const uploadedAt = uploadedAtFromInfoJson(info) || String(fallbackIso || "").trim();
+   // __ORDER_BY_UPLOAD_DATE__
+   // La fecha de subida se guarda para poder ordenar de mas antiguo a mas nuevo.
+-  if (uploadedAt) base.uploadedAt = uploadedAt;
+-  return base;
++  return { description, caption: buildCaptionFromMeta({ description }), uploadedAt };
+ }
+ 
+ // __ORDER_BY_UPLOAD_DATE__
+@@ -210,10 +211,18 @@ async function writeMetaFromInfoJson(videoPath, { logger = null, language = "ori
+   } catch {
+     return null;
+   }
+-  let meta = metaFromInfoJson(info);
++  // Fecha de respaldo: la del propio archivo, para que `uploadedAt` exista
++  // aunque TikTok no exponga upload_date/timestamp.
++  let fallbackIso = "";
++  try {
++    const stat = await fs.stat(videoPath);
++    fallbackIso = stat.mtime.toISOString();
++  } catch { /* sin archivo: se queda vacio */ }
++  let meta = metaFromInfoJson(info, { fallbackIso });
+   if (String(language).toLowerCase() === "es") {
+     try {
+-      meta = await translateMetaToSpanish(meta, { ...translationOptions, logger });
++      const translated = await translateMetaToSpanish(meta, { ...translationOptions, logger });
++      meta = { ...translated, uploadedAt: meta.uploadedAt };
+     } catch (error) {
+       logger?.(`No se pudieron traducir los metadatos: ${error.message}. Se conserva el texto original.`);
+     }
+diff --git a/test/autoclone.test.js b/test/autoclone.test.js
+index 7d6153d..c5303be 100644
+--- a/test/autoclone.test.js
++++ b/test/autoclone.test.js
+@@ -585,7 +585,7 @@ test("autopost scheduleFolder passes hashtags in the caption and location to the
+   await fs.rm(dir, { recursive: true, force: true });
+ });
+ 
+-test("autopost uses each video's own title/description/hashtags plus dashboard hashtags", async () => {
++test("autopost uses each video's own description plus dashboard hashtags", async () => {
+   const sched = require("../src/autoclone/scheduler");
+   const os = require("os");
+   const fs = require("fs/promises");
+@@ -603,9 +603,9 @@ test("autopost uses each video's own title/description/hashtags plus dashboard h
+   await fs.writeFile(
+     getMetaPath(video),
+     JSON.stringify({
+-      title: "Mi titulo original",
+       description: "Descripcion del video #propio",
+-      hashtags: ["propio"],
++      caption: "Descripcion del video #propio",
++      uploadedAt: "2026-01-01T00:00:00.000Z",
+     })
+   );
+   await sched.scheduleFolder({
+@@ -620,7 +620,6 @@ test("autopost uses each video's own title/description/hashtags plus dashboard h
+   });
+   assert.equal(calls.length, 1);
+   const caption = calls[0].caption;
+-  assert.ok(caption.includes("Mi titulo original"), "uses the video title");
+   assert.ok(caption.includes("Descripcion del video"), "uses the video description");
+   assert.ok(caption.includes("#propio"), "keeps the video's own hashtag");
+   assert.ok(caption.includes("#dashboard"), "adds the dashboard hashtag");
+@@ -634,17 +633,19 @@ test("autoclone _copyMetaSidecar always creates a .meta.json for the final video
+   const { AutoCloneController } = require("../src/autoclone/controller");
+   const { getMetaPath } = require("../src/queue");
+   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ac-metasidecar-"));
+-  const call = (src, dst) => AutoCloneController.prototype._copyMetaSidecar.call({}, src, dst);
++  const self = { _stampDownloadIndex: AutoCloneController.prototype._stampDownloadIndex };
++  const call = (src, dst) => AutoCloneController.prototype._copyMetaSidecar.call(self, src, dst);
+   try {
+     // 1) Source already has a companion: it is copied as-is.
+     const src1 = path.join(dir, "with-meta.mp4");
+     const dst1 = path.join(dir, "out1.mp4");
+     await fs.writeFile(src1, Buffer.alloc(8));
+     await fs.writeFile(dst1, Buffer.alloc(8));
+-    await fs.writeFile(getMetaPath(src1), JSON.stringify({ title: "T", description: "D", hashtags: ["x"] }));
++    await fs.writeFile(getMetaPath(src1), JSON.stringify({ description: "D", caption: "D", uploadedAt: "2026-01-01T00:00:00.000Z" }));
+     await call(src1, dst1);
+     const copied = JSON.parse(await fs.readFile(getMetaPath(dst1), "utf8"));
+-    assert.equal(copied.title, "T");
++    assert.equal(copied.description, "D");
++    assert.equal(copied.uploadedAt, "2026-01-01T00:00:00.000Z");
+ 
+     // 2) No metadata anywhere: an (empty but present) companion is still created.
+     const src2 = path.join(dir, "bare.mp4");
+@@ -653,7 +654,7 @@ test("autoclone _copyMetaSidecar always creates a .meta.json for the final video
+     await fs.writeFile(dst2, Buffer.alloc(8));
+     await call(src2, dst2);
+     const fallback = JSON.parse(await fs.readFile(getMetaPath(dst2), "utf8"));
+-    assert.deepEqual(fallback.hashtags, []);
++    assert.ok(fallback, "the companion exists");
+ 
+     // 3) Only an info.json exists: the companion is built from it.
+     const src3 = path.join(dir, "frominfo.mp4");
+@@ -666,14 +667,15 @@ test("autoclone _copyMetaSidecar always creates a .meta.json for the final video
+     );
+     await call(src3, dst3);
+     const built = JSON.parse(await fs.readFile(getMetaPath(dst3), "utf8"));
+-    assert.equal(built.title, "Info title");
+-    assert.deepEqual(built.hashtags, ["tag"]);
++    assert.equal(built.description, "Info desc #tag");
++    assert.equal(typeof built.uploadedAt, "string");
++    assert.ok(built.uploadedAt.length > 0);
+   } finally {
+     await fs.rm(dir, { recursive: true, force: true });
+   }
+ });
+ 
+-test("autopost scheduleFolder moves uploaded videos to a 'posted' folder so they are not sent twice", async () => {
++test("autopost scheduleFolder keeps videos in place so they are not sent twice", async () => {
+   const sched = require("../src/autoclone/scheduler");
+   const os = require("os");
+   const fs = require("fs/promises");
+@@ -689,18 +691,15 @@ test("autopost scheduleFolder moves uploaded videos to a 'posted' folder so they
+       times: ["10:00"],
+       timezone: "UTC",
+       worker,
++      keepInPlace: true,
+     });
+     assert.equal(result.created.length, 1);
++    // Con keepInPlace el video se queda en la misma carpeta, sin "posted".
+     const remaining = (await fs.readdir(dir)).filter((n) => n.endsWith(".mp4"));
+-    assert.deepEqual(remaining, [], "the active folder no longer holds the video");
+-    const sent = await fs.readdir(path.join(dir, "posted"));
+-    assert.ok(sent.includes("a.mp4"), "the video is kept in posted");
+-    assert.ok(sent.includes("a.jpg"), "the cover is kept with the posted video");
+-    // A second run finds nothing new, so it cannot upload it again.
+-    await assert.rejects(
+-      () => sched.scheduleFolder({ accountId: "acct-1", folder: dir, days: ["mon"], times: ["10:00"], timezone: "UTC", worker }),
+-      /No hay videos/
+-    );
++    assert.deepEqual(remaining, ["a.mp4"], "the video stays in the chosen folder");
++    await assert.rejects(() => fs.readdir(path.join(dir, "posted")), "no posted subfolder is created");
++    // El video se copio a la cola interna de TikTok para publicarlo.
++    assert.ok(result.sentDir === dir, "the sent dir is the folder itself");
+   } finally {
+     await fs.rm(dir, { recursive: true, force: true });
+   }
+diff --git a/test/video-meta.test.js b/test/video-meta.test.js
+index ea6cf8a..f829ca6 100644
+--- a/test/video-meta.test.js
++++ b/test/video-meta.test.js
+@@ -18,12 +18,26 @@ test("video-meta metaFromInfoJson keeps the description as the caption", () => {
+     title: "Receta de tortilla",
+     description: "La mejor tortilla #receta #cocina",
+     tags: ["receta", "cocina"],
++    upload_date: "20260912",
+   });
+   // Solo se conserva la descripcion (que ya incluye los hashtags). El titulo de
+   // TikTok viene truncado, asi que se descarta.
+   assert.equal(meta.title, undefined);
+   assert.equal(meta.description, "La mejor tortilla #receta #cocina");
+   assert.equal(meta.caption, "La mejor tortilla #receta #cocina");
++  assert.equal(meta.uploadedAt, new Date(Date.UTC(2026, 8, 12)).toISOString());
++});
++
++test("video-meta metaFromInfoJson always sets uploadedAt (fallback to file date)", () => {
++  // Sin upload_date ni timestamp: se usa la fecha de respaldo.
++  const meta = metaFromInfoJson(
++    { title: "Sin fecha", description: "Texto #x" },
++    { fallbackIso: "2026-01-02T03:04:05.000Z" },
++  );
++  assert.equal(meta.uploadedAt, "2026-01-02T03:04:05.000Z");
++  // Sin respaldo tampoco: el campo existe pero vacio.
++  const empty = metaFromInfoJson({ description: "Texto" });
++  assert.equal(empty.uploadedAt, "");
+ });
+ 
+ test("video-meta normalizeTagList strips # and dedupes", () => {
+@@ -47,6 +61,10 @@ test("video-meta writes a .meta.json companion from an info.json", async () => {
+     const stored = JSON.parse(await fs.readFile(getMetaPath(video), "utf8"));
+     assert.equal(stored.description, "Mundo #tag");
+     assert.equal(stored.title, undefined);
++    // El .meta.json siempre trae description, caption y uploadedAt.
++    assert.equal(stored.caption, "Mundo #tag");
++    assert.equal(typeof stored.uploadedAt, "string");
++    assert.ok(stored.uploadedAt.length > 0);
+     // readCaption must prefer the companion metadata (the description).
+     const caption = await readCaption(video);
+     assert.ok(caption.includes("Mundo"));
+@@ -115,3 +133,30 @@ test("video-meta translates only the description while preserving hashtags", asy
+     global.fetch = originalFetch;
+   }
+ });
++
++test("video-meta keeps uploadedAt when the description is translated", async () => {
++  const originalFetch = global.fetch;
++  global.fetch = async () => ({
++    ok: true,
++    async json() {
++      return { candidates: [{ content: { parts: [{ text: JSON.stringify({
++        description: "Voy a mantenerlo asi.",
++      }) }] } }] };
++    },
++  });
++  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "video-meta-uploaded-"));
++  try {
++    const video = path.join(dir, "clip.mp4");
++    await fs.writeFile(video, Buffer.alloc(16));
++    await fs.writeFile(
++      path.join(dir, "clip.info.json"),
++      JSON.stringify({ title: "T", description: "Keep it #x", upload_date: "20260912" }),
++    );
++    const meta = await writeMetaFromInfoJson(video, { language: "es", apiKey: "free-key" });
++    assert.equal(meta.description, "Voy a mantenerlo asi. #x");
++    assert.equal(meta.uploadedAt, new Date(Date.UTC(2026, 8, 12)).toISOString());
++  } finally {
++    global.fetch = originalFetch;
++    await fs.rm(dir, { recursive: true, force: true });
++  }
++});

@@ -18,12 +18,26 @@ test("video-meta metaFromInfoJson keeps the description as the caption", () => {
     title: "Receta de tortilla",
     description: "La mejor tortilla #receta #cocina",
     tags: ["receta", "cocina"],
+    upload_date: "20260912",
   });
   // Solo se conserva la descripcion (que ya incluye los hashtags). El titulo de
   // TikTok viene truncado, asi que se descarta.
   assert.equal(meta.title, undefined);
   assert.equal(meta.description, "La mejor tortilla #receta #cocina");
   assert.equal(meta.caption, "La mejor tortilla #receta #cocina");
+  assert.equal(meta.uploadedAt, new Date(Date.UTC(2026, 8, 12)).toISOString());
+});
+
+test("video-meta metaFromInfoJson always sets uploadedAt (fallback to file date)", () => {
+  // Sin upload_date ni timestamp: se usa la fecha de respaldo.
+  const meta = metaFromInfoJson(
+    { title: "Sin fecha", description: "Texto #x" },
+    { fallbackIso: "2026-01-02T03:04:05.000Z" },
+  );
+  assert.equal(meta.uploadedAt, "2026-01-02T03:04:05.000Z");
+  // Sin respaldo tampoco: el campo existe pero vacio.
+  const empty = metaFromInfoJson({ description: "Texto" });
+  assert.equal(empty.uploadedAt, "");
 });
 
 test("video-meta normalizeTagList strips # and dedupes", () => {
@@ -47,6 +61,10 @@ test("video-meta writes a .meta.json companion from an info.json", async () => {
     const stored = JSON.parse(await fs.readFile(getMetaPath(video), "utf8"));
     assert.equal(stored.description, "Mundo #tag");
     assert.equal(stored.title, undefined);
+    // El .meta.json siempre trae description, caption y uploadedAt.
+    assert.equal(stored.caption, "Mundo #tag");
+    assert.equal(typeof stored.uploadedAt, "string");
+    assert.ok(stored.uploadedAt.length > 0);
     // readCaption must prefer the companion metadata (the description).
     const caption = await readCaption(video);
     assert.ok(caption.includes("Mundo"));
@@ -113,5 +131,98 @@ test("video-meta translates only the description while preserving hashtags", asy
     assert.equal(calls.length, 1);
   } finally {
     global.fetch = originalFetch;
+  }
+});
+
+test("video-meta translates with xKiro when only an xKiro key is set", async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return {
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({
+          description: "Voy a mantenerlo asi.",
+        }) } }] };
+      },
+    };
+  };
+  try {
+    const translated = await translateMetaToSpanish({
+      description: "I am going to keep it that way. #booktok #bookgirlies",
+    }, { xKiroKey: "sk-xt-test" });
+    assert.equal(translated.description, "Voy a mantenerlo asi. #booktok #bookgirlies");
+    assert.equal(translated.caption, "Voy a mantenerlo asi. #booktok #bookgirlies");
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /api\.xkiro\.com\/v1\/chat\/completions/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("video-meta falls back to the next xKiro model when one is unavailable", async () => {
+  const originalFetch = global.fetch;
+  const models = [];
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    models.push(body.model);
+    if (models.length === 1) {
+      return { ok: false, async json() { return { error: { message: "service_unavailable" } }; } };
+    }
+    return {
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: JSON.stringify({ description: "Hola." }) } }] };
+      },
+    };
+  };
+  try {
+    const translated = await translateMetaToSpanish(
+      { description: "Hello." },
+      { xKiroKey: "sk-xt-test" },
+    );
+    assert.equal(translated.description, "Hola.");
+    assert.equal(models.length, 2);
+    assert.notEqual(models[0], models[1]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("video-meta warns instead of failing silently when no key is configured", async () => {
+  const messages = [];
+  const translated = await translateMetaToSpanish(
+    { description: "Hello #tag" },
+    { logger: (m) => messages.push(m) },
+  );
+  assert.equal(translated.description, "Hello #tag");
+  assert.ok(messages.some((m) => /API key/i.test(m)));
+});
+
+test("video-meta keeps uploadedAt when the description is translated", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return { candidates: [{ content: { parts: [{ text: JSON.stringify({
+        description: "Voy a mantenerlo asi.",
+      }) }] } }] };
+    },
+  });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "video-meta-uploaded-"));
+  try {
+    const video = path.join(dir, "clip.mp4");
+    await fs.writeFile(video, Buffer.alloc(16));
+    await fs.writeFile(
+      path.join(dir, "clip.info.json"),
+      JSON.stringify({ title: "T", description: "Keep it #x", upload_date: "20260912" }),
+    );
+    const meta = await writeMetaFromInfoJson(video, { language: "es", apiKey: "free-key" });
+    assert.equal(meta.description, "Voy a mantenerlo asi. #x");
+    assert.equal(meta.uploadedAt, new Date(Date.UTC(2026, 8, 12)).toISOString());
+  } finally {
+    global.fetch = originalFetch;
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

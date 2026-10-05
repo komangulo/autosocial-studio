@@ -489,4 +489,163 @@
 
   if (!els.folder.value) els.folder.value = rememberedFolder();
   refreshAccount();
+  // ==================================================================
+  // CALENTADOR-TIKTOK: boton "Calentar cuenta" / "Parar calentamiento"
+  // Integrado en la barra de TikTok, junto a los demas botones.
+  // Al pulsar, abre la ventana de Chromium con el perfil de la cuenta
+  // seleccionada, entra a "Para ti" y baja videos cada 4 s.
+  // ==================================================================
+  let calentadorPollTimer = null;
+
+  // Llamada robusta: usa API.post si existe; si no, fetch directo.
+  async function calentadorPost(action, payload) {
+    try {
+      if (API && typeof API.post === "function") {
+        return await API.post("/api/tiktok/warm/" + action, payload || {});
+      }
+    } catch (e) { /* cae a fetch */ }
+    const res = await fetch("/api/tiktok/warm/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    return res.json();
+  }
+
+  async function calentadorGet(action) {
+    try {
+      if (API && typeof API.get === "function") {
+        return await API.get("/api/tiktok/warm/" + action);
+      }
+    } catch (e) { /* cae a fetch */ }
+    const res = await fetch("/api/tiktok/warm/" + action);
+    return res.json();
+  }
+
+  function calentadorSetEstado(estado, on) {
+    const badge = $("ttWarmStateBadge");
+    if (badge) {
+      badge.textContent = estado;
+      badge.className = "status-badge " + (on ? "active" : "warn");
+    }
+  }
+
+  function calentadorRender(st) {
+    const startBtn = $("ttWarmStartBtn");
+    const stopBtn = $("ttWarmStopBtn");
+    if (!startBtn || !stopBtn) return;
+    if (st && st.running) {
+      const segs = Math.round((st.elapsedMs || 0) / 1000);
+      const mm = String(Math.floor(segs / 60)).padStart(2, "0");
+      const ss = String(segs % 60).padStart(2, "0");
+      calentadorSetEstado("Calentando · " + (st.scrollCount || 0) + " vídeos · " + mm + ":" + ss, true);
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    } else {
+      calentadorSetEstado(st && st.lastError ? ("Parado (" + st.lastError + ")") : "Calentamiento parado", false);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+  }
+
+  async function calentadorRefresh() {
+    const id = currentAccountId();
+    if (!id) { calentadorRender(null); return; }
+    try {
+      const st = await calentadorGet("status?accountId=" + encodeURIComponent(id));
+      calentadorRender(st);
+    } catch { /* ignore */ }
+  }
+
+  async function calentadorStart() {
+    const id = currentAccountId();
+    if (!id) { setMessage("Elige una cuenta en el desplegable antes de calentar.", "error"); return; }
+    const btn = $("ttWarmStartBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Abriendo…"; }
+    setMessage("Abriendo Chromium con la cuenta seleccionada y entrando a “Para ti”…");
+    try {
+      const r = await calentadorPost("start", withAccount({}));
+      if (r && r.ok === false) throw new Error(r.error || "No se pudo iniciar.");
+      setMessage("Calentamiento iniciado. La ventana de Chromium bajará vídeos cada 4 s. Pulsa «Parar calentamiento» para detenerlo.", "ok");
+    } catch (error) {
+      setMessage("No se pudo iniciar el calentamiento: " + error.message, "error");
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Calentar cuenta"; }
+      calentadorRefresh();
+    }
+  }
+
+  async function calentadorStop() {
+    const id = currentAccountId();
+    const btn = $("ttWarmStopBtn");
+    if (btn) btn.disabled = true;
+    try {
+      await calentadorPost("stop", withAccount({}));
+      setMessage("Calentamiento parado.", "ok");
+    } catch (error) {
+      setMessage("No se pudo parar: " + error.message, "error");
+    } finally {
+      calentadorRefresh();
+    }
+  }
+
+  // Crea los botones una sola vez y los coloca JUNTO al boton de login,
+  // dentro de la misma barra de botones de TikTok.
+  function calentadorMontarBotones() {
+    if ($("ttWarmStartBtn")) return;
+    const ref = els.loginBtn;
+    if (!ref || !ref.parentNode) return;
+
+    const wrap = document.createElement("span");
+    wrap.id = "ttWarmActions";
+    wrap.style.display = "inline-flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "8px";
+    wrap.style.marginLeft = "8px";
+
+    const badge = document.createElement("span");
+    badge.id = "ttWarmStateBadge";
+    badge.className = "status-badge warn";
+    badge.textContent = "Calentamiento parado";
+
+    const start = document.createElement("button");
+    start.id = "ttWarmStartBtn";
+    start.type = "button";
+    start.className = ref.className || "btn";
+    start.textContent = "Calentar cuenta";
+    start.title = "Abre Chromium con esta cuenta, entra a Para ti y baja vídeos cada 4 s";
+
+    const stop = document.createElement("button");
+    stop.id = "ttWarmStopBtn";
+    stop.type = "button";
+    stop.className = ref.className || "btn";
+    stop.textContent = "Parar calentamiento";
+    stop.disabled = true;
+
+    start.addEventListener("click", calentadorStart);
+    stop.addEventListener("click", calentadorStop);
+
+    wrap.appendChild(badge);
+    wrap.appendChild(start);
+    wrap.appendChild(stop);
+    ref.parentNode.insertBefore(wrap, ref.nextSibling);
+
+    calentadorRefresh();
+  }
+
+  // Monta los botones al arrancar y los vigila por si la barra se re-renderiza.
+  function calentadorTick() {
+    try { calentadorMontarBotones(); } catch (e) { /* ignore */ }
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => setTimeout(calentadorTick, 200));
+  } else {
+    setTimeout(calentadorTick, 200);
+  }
+  if (calentadorPollTimer) clearInterval(calentadorPollTimer);
+  calentadorPollTimer = setInterval(() => {
+    calentadorTick();
+    if ($("ttWarmStartBtn")) calentadorRefresh();
+  }, 4000);
+
 })();

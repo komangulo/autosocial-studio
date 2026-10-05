@@ -57,6 +57,8 @@ qa-*.png
 *.webm
 *.avi
 *.mkv
+# ...except the tiny test fixture the suite needs.
+!test/fixtures/*.mp4
 queue/**/*.description
 queue/**/*.txt
 

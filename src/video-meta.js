@@ -16,6 +16,16 @@ const { buildCaptionFromMeta, extractHashtags } = require("./queue");
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+// xKiro expone una API compatible con OpenAI.
+const XKIRO_BASE = "https://api.xkiro.com/v1";
+const XKIRO_DEFAULT_MODEL = "minimax/minimax-m3:free";
+// Si el modelo preferido no responde (p. ej. 503 del tier gratis), se prueban
+// estos en orden antes de darse por vencido.
+const XKIRO_FALLBACK_MODELS = [
+  "qwen/qwen3.7-flash:free",
+  "cohere/command-a-translate",
+  "mistralai/ministral-14b",
+];
 
 const INFO_JSON_SUFFIX = ".info.json";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm", ".avi", ".mkv"]);
@@ -49,21 +59,22 @@ function normalizeTagList(value) {
 }
 
 /**
- * META-DESC-ONLY-v1
+ * META-DESC-ONLY-v2
  * Build the companion metadata object from a yt-dlp info.json payload.
  * TikTok no tiene titulo: la descripcion trae el texto completo y los
  * hashtags. El "title" de yt-dlp viene truncado con "..." y los "tags"
  * repetirian lo que ya esta en la descripcion, asi que se descartan.
- * Shape: { description, caption }
+ * Shape: { description, caption, uploadedAt }
+ *
+ * `uploadedAt` SIEMPRE esta presente: si TikTok no expone la fecha se usa
+ * `fallbackIso` (la fecha del archivo), que el controlador rellena.
  */
-function metaFromInfoJson(info = {}) {
+function metaFromInfoJson(info = {}, { fallbackIso = "" } = {}) {
   const description = String(info.description || "").trim();
-  const uploadedAt = uploadedAtFromInfoJson(info);
-  const base = { description, caption: buildCaptionFromMeta({ description }) };
+  const uploadedAt = uploadedAtFromInfoJson(info) || String(fallbackIso || "").trim();
   // __ORDER_BY_UPLOAD_DATE__
   // La fecha de subida se guarda para poder ordenar de mas antiguo a mas nuevo.
-  if (uploadedAt) base.uploadedAt = uploadedAt;
-  return base;
+  return { description, caption: buildCaptionFromMeta({ description }), uploadedAt };
 }
 
 // __ORDER_BY_UPLOAD_DATE__
@@ -153,6 +164,45 @@ async function callOpenRouterTranslation(apiKey, prompt) {
   return data.choices?.[0]?.message?.content || "";
 }
 
+async function callXKiroTranslation(apiKey, prompt, model = XKIRO_DEFAULT_MODEL) {
+  const models = [model, ...XKIRO_FALLBACK_MODELS].filter(Boolean);
+  let lastError = null;
+  for (const candidate of models) {
+    try {
+      return await callXKiroModel(apiKey, prompt, candidate);
+    } catch (error) {
+      lastError = error;
+      // 503/429 del tier gratis: se intenta el siguiente modelo.
+    }
+  }
+  throw lastError || new Error("xKiro no respondio con ningun modelo.");
+}
+
+async function callXKiroModel(apiKey, prompt, model) {
+  const response = await fetch(`${XKIRO_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: "Eres un traductor de metadatos para videos de TikTok. Devuelve exclusivamente JSON valido." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 1200,
+      response_format: { type: "json_object" },
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || `xKiro respondio ${response.status}`);
+  const content = data.choices?.[0]?.message?.content || "";
+  if (!content) throw new Error("xKiro devolvio una respuesta vacia.");
+  return content;
+}
+
 /**
  * TRANS-DESC-ONLY
  * Translate the description to Spanish while preserving hashtags.
@@ -162,6 +212,8 @@ async function translateMetaToSpanish(meta, {
   paidApiKey = "",
   paidModel = "gemini-3.6-flash",
   openRouterKey = "",
+  xKiroKey = "",
+  xKiroModel = XKIRO_DEFAULT_MODEL,
   logger = null,
 } = {}) {
   const original = {
@@ -174,11 +226,16 @@ async function translateMetaToSpanish(meta, {
     JSON.stringify(original),
   ].join("\n");
 
+  // xKiro primero: es el proveedor que ya usa el resto de la app.
   const providers = [];
+  if (xKiroKey) providers.push(() => callXKiroTranslation(xKiroKey, prompt, xKiroModel));
   if (apiKey) providers.push(() => callGeminiTranslation(apiKey, "gemini-2.5-flash", prompt));
   if (paidApiKey && paidApiKey !== apiKey) providers.push(() => callGeminiTranslation(paidApiKey, paidModel, prompt));
   if (openRouterKey) providers.push(() => callOpenRouterTranslation(openRouterKey, prompt));
-  if (!providers.length) return { ...original, caption: buildCaptionFromMeta(original) };
+  if (!providers.length) {
+    logger?.("Sin API key de IA: no se pudo traducir el .meta.json. Configura xKiro en Ajustes.");
+    return { ...original, caption: buildCaptionFromMeta(original) };
+  }
 
   let lastError = null;
   for (const request of providers) {
@@ -210,10 +267,18 @@ async function writeMetaFromInfoJson(videoPath, { logger = null, language = "ori
   } catch {
     return null;
   }
-  let meta = metaFromInfoJson(info);
+  // Fecha de respaldo: la del propio archivo, para que `uploadedAt` exista
+  // aunque TikTok no exponga upload_date/timestamp.
+  let fallbackIso = "";
+  try {
+    const stat = await fs.stat(videoPath);
+    fallbackIso = stat.mtime.toISOString();
+  } catch { /* sin archivo: se queda vacio */ }
+  let meta = metaFromInfoJson(info, { fallbackIso });
   if (String(language).toLowerCase() === "es") {
     try {
-      meta = await translateMetaToSpanish(meta, { ...translationOptions, logger });
+      const translated = await translateMetaToSpanish(meta, { ...translationOptions, logger });
+      meta = { ...translated, uploadedAt: meta.uploadedAt };
     } catch (error) {
       logger?.(`No se pudieron traducir los metadatos: ${error.message}. Se conserva el texto original.`);
     }
