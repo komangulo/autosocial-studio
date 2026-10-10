@@ -1,17 +1,17 @@
 {
-  "jobId": "71ee7b88-3708-4fa5-92b2-8dbc2d51bcd0",
-  "videoName": "2026-01-13_7594834626695138574.mp4",
-  "path": "C:\\Users\\msi\\Downloads\\autosocial-studio\\queue\\pelishorts\\tiktok\\processing\\71ee7b88-3708-4fa5-92b2-8dbc2d51bcd0\\2026-01-13_7594834626695138574.mp4",
+  "jobId": "0a5cb0f2-c658-42f1-a08f-5acad02bcfd3",
+  "videoName": "7363659591835684142_unique.mp4",
+  "path": "C:\\Users\\msi\\Downloads\\autosocial-studio\\queue\\madrid-nueva-modelo\\tiktok\\processing\\0a5cb0f2-c658-42f1-a08f-5acad02bcfd3\\7363659591835684142_unique.mp4",
   "sourceFingerprint": {
-    "sizeBytes": 18212855,
-    "sha256": "48951a236b853fc343e58138a3d2027ff0ae723b55341dc72765ce737977f5e1"
+    "sizeBytes": 2094937,
+    "sha256": "3b1ccc322ca98575a0c01a3d492d6262aa01dde72b366dcfd07e14c169b6ee1e"
   },
   "reservedFingerprint": {
-    "sizeBytes": 18212855,
-    "sha256": "48951a236b853fc343e58138a3d2027ff0ae723b55341dc72765ce737977f5e1"
+    "sizeBytes": 2094937,
+    "sha256": "3b1ccc322ca98575a0c01a3d492d6262aa01dde72b366dcfd07e14c169b6ee1e"
   },
   "uploadFingerprint": {
-    "sizeBytes": 18212855,
-    "sha256": "48951a236b853fc343e58138a3d2027ff0ae723b55341dc72765ce737977f5e1"
+    "sizeBytes": 2094937,
+    "sha256": "3b1ccc322ca98575a0c01a3d492d6262aa01dde72b366dcfd07e14c169b6ee1e"
   }
 }

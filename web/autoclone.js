@@ -375,10 +375,7 @@
         downloadOrder: els.downloadOrder?.value || "oldest",
         downloadThumbnail: Boolean(els.downloadThumbnail?.checked),
         startMode: els.startMode?.value || "continue",
-        // MARKER: ARREGLO-IDIOMA-ORIGINAL-AUTOCLONE
-        // Sin esto, la descarga de perfil no enviaba el idioma y el backend
-        // traducia siempre (asumia "es"). Con "Original" debe quedarse igual.
-        metadataLanguage: els.metadataLanguage?.value || "es",
+        metadataLanguage: els.metadataLanguage?.value || "original",
         destinationRoot,
       });
       currentJobId = data.id;
@@ -424,7 +421,7 @@
          translate: els.translate.checked,
          karaoke: Boolean(els.karaoke?.checked),
          uniquifyIntensity: els.intensity?.value || "media",
-         metadataLanguage: els.metadataLanguage?.value || "es",
+         metadataLanguage: els.metadataLanguage?.value || "original",
          downloadOrder: els.downloadOrder?.value || "oldest",
          downloadThumbnail: Boolean(els.downloadThumbnail?.checked),
          startMode: els.startMode?.value || "continue",

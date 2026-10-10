@@ -681,18 +681,7 @@ class AutoCloneController extends EventEmitter {
       });
     }
     jobs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    // Limpia las carpetas "work" de trabajos ya terminados: son temporales y
-    // dejaban una subcarpeta por video en ejecuciones anteriores.
-    await this._cleanFinishedWorkDirs(jobs);
     return jobs;
-  }
-
-  /** Remove leftover "work" folders from jobs that already finished. */
-  async _cleanFinishedWorkDirs(jobs) {
-    const finished = (jobs || []).filter((job) => ["done", "error", "cancelled"].includes(job.status));
-    for (const job of finished) {
-      await fs.rm(path.join(JOBS_DIR, safeId(job.id), "work"), { recursive: true, force: true }).catch(() => {});
-    }
   }
 
   async getJob(id) { return readJson(path.join(JOBS_DIR, `${safeId(id)}.json`), null); }
@@ -778,7 +767,11 @@ class AutoCloneController extends EventEmitter {
         uniquifyOptions: options.uniquifyOptions && typeof options.uniquifyOptions === "object"
           ? options.uniquifyOptions
           : {},
-        metadataLanguage: options.metadataLanguage === "original" ? "original" : "es",
+        // Por defecto NO se traduce: solo se traduce si el usuario elige
+        // explicitamente "Español" (metadataLanguage === "es"). Asi las rutas
+        // que no envian el idioma (p. ej. "Descargar videos nuevos") conservan
+        // el titulo, la descripcion y los hashtags originales del video.
+        metadataLanguage: options.metadataLanguage === "es" ? "es" : "original",
         downloadThumbnail: options.downloadThumbnail === true,
         downloadOrder: options.downloadOrder === "recent" ? "recent" : "oldest",
         startMode: options.startMode === "restart" ? "restart" : "continue",
@@ -845,7 +838,6 @@ class AutoCloneController extends EventEmitter {
         job.folder = this._userDir(job);
         job.videos = originals.map((video) => ({ ...video, status: "done" }));
         await this._saveJob(job);
-        await this._cleanWorkDir(job);
         this._report(
           "done",
           `Descarga original completada: ${job.videos.length} videos sin modificar. Guardados en ${job.folder}`,
@@ -895,7 +887,6 @@ class AutoCloneController extends EventEmitter {
         job.finishedAt = nowIso();
         job.folder = this._userDir(job);
         await this._saveJob(job);
-        await this._cleanWorkDir(job);
         this._report("done", `No hay videos nuevos posteriores al marcador.`, { percent: 100, jobId: job.id, folder: job.folder });
         return;
       }
@@ -935,8 +926,6 @@ class AutoCloneController extends EventEmitter {
       job.finishedAt = nowIso();
       job.folder = this._userDir(job);
       await this._saveJob(job);
-      // Sin archivos temporales: borra "work" entera para no dejar subcarpetas.
-      await this._cleanWorkDir(job);
       const processedCount = job.videos.filter((v) => v.status === "done").length;
       const publishedCount = job.videos.filter((v) => v.publishStatus === "published").length;
       const publishFailedCount = job.videos.filter((v) => v.publishStatus === "failed").length;
@@ -951,17 +940,7 @@ class AutoCloneController extends EventEmitter {
       job.error = error.message;
       job.finishedAt = nowIso();
       await this._saveJob(job).catch(() => {});
-      await this._cleanWorkDir(job);
       this._report("error", error.message, { percent: 100, jobId: job.id });
-    }
-  }
-
-  /** Remove the job's temporary "work" folder so no per-video subfolders remain. */
-  async _cleanWorkDir(job) {
-    try {
-      await fs.rm(this._workDir(job), { recursive: true, force: true });
-    } catch {
-      // Non-fatal: a leftover temp folder never blocks the run.
     }
   }
 
@@ -1316,7 +1295,7 @@ class AutoCloneController extends EventEmitter {
     await fs.mkdir(workDir, { recursive: true });
     let current = video.sourcePath;
     video.notes = [];
-    try {
+
     const { uniquifyVideo, resolveUniquifyOptions } = require("../video-uniquifier");
     const strengthOptions = resolveUniquifyOptions({
       ...(job.options.uniquifyOptions || {}),
@@ -1401,14 +1380,9 @@ class AutoCloneController extends EventEmitter {
     }
     // Carry the original title/description/hashtags next to the final video so
     // Auto Post can publish with them.
-    await this._copyMetaSidecar(video.sourcePath, outputPath, video.downloadIndex, { job, ai });
+    await this._copyMetaSidecar(video.sourcePath, outputPath, video.downloadIndex, job.options.metadataLanguage);
     await this._copyThumbnailSidecar(video.sourcePath, outputPath);
     return { outputPath, outputSizeBytes: stat.size };
-    } finally {
-      // Borra la carpeta temporal del video (mirror, subtitulos, traducido...)
-      // para no dejar una subcarpeta por video dentro de "work".
-      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
-    }
   }
 
   // __ORDER_BY_UPLOAD_DATE__
@@ -1450,30 +1424,36 @@ class AutoCloneController extends EventEmitter {
    * can always publish with the original title, description and hashtags. It is
    * created even when the video has no translatable text.
    */
-  async _copyMetaSidecar(sourceVideoPath, targetVideoPath, downloadIndex = null, { job = null, ai = null } = {}) {
+  async _copyMetaSidecar(sourceVideoPath, targetVideoPath, downloadIndex = null, metadataLanguage = "original") {
     const { getMetaPath } = require("../queue");
     const { writeMetaFromInfoJson, metaJsonPathFor, metaFromInfoJson, INFO_JSON_SUFFIX } = require("../video-meta");
     const targetMeta = getMetaPath(targetVideoPath);
 
+    // Solo se reutiliza el .meta.json ya creado si su idioma coincide con el
+    // pedido. Si el usuario pide "original" pero el sidecar venia traducido de
+    // una ejecucion anterior (o al reves), se regenera desde el .info.json para
+    // no arrastrar el idioma equivocado.
+    const wantsSpanish = String(metadataLanguage).toLowerCase() === "es";
+    let existingMeta = null;
     try {
-      // 1) Preferred: the metadata file already built next to the download.
-      await fs.copyFile(getMetaPath(sourceVideoPath), targetMeta);
-      await this._stampDownloadIndex(targetVideoPath, downloadIndex);
-      return;
+      existingMeta = JSON.parse(await fs.readFile(getMetaPath(sourceVideoPath), "utf8"));
     } catch {
-      // No companion yet: try to build it from yt-dlp's info.json.
+      existingMeta = null;
+    }
+    const isSpanishMeta = Boolean(existingMeta && existingMeta.__translated);
+    if (existingMeta && wantsSpanish === isSpanishMeta) {
+      try {
+        await fs.copyFile(getMetaPath(sourceVideoPath), targetMeta);
+        await this._stampDownloadIndex(targetVideoPath, downloadIndex);
+        return;
+      } catch {
+        // Continua con la regeneracion desde el info.json.
+      }
     }
 
     try {
-      // Sin sidecar previo: se construye (y se traduce si el idioma es "es").
       const meta = await writeMetaFromInfoJson(sourceVideoPath, {
-        language: job?.options?.metadataLanguage || "original",
-        apiKey: ai?.apiKey || "",
-        paidApiKey: ai?.paidApiKey || "",
-        paidModel: ai?.paidModel || "",
-        openRouterKey: ai?.openRouterKey || "",
-        xKiroKey: ai?.xKiroKey || "",
-        logger: (m) => this._report("download", m, {}),
+        language: wantsSpanish ? "es" : "original",
       });
       if (meta) {
         await fs.copyFile(metaJsonPathFor(sourceVideoPath), targetMeta);
@@ -1488,14 +1468,9 @@ class AutoCloneController extends EventEmitter {
     // final video is guaranteed to carry a metadata companion.
     try {
       const { readVideoMeta } = require("../queue");
-      const read = await readVideoMeta(sourceVideoPath);
-      const payload = {
-        description: read?.description || "",
-        caption: read?.caption || read?.description || "",
-        uploadedAt: read?.uploadedAt || "",
-      };
+      const meta = await readVideoMeta(sourceVideoPath);
+      const payload = meta || { title: "", description: "", hashtags: [], caption: "" };
       if (Number.isInteger(downloadIndex)) payload.downloadIndex = downloadIndex;
-      else if (Number.isInteger(read?.downloadIndex)) payload.downloadIndex = read.downloadIndex;
       await fs.writeFile(targetMeta, JSON.stringify(payload, null, 2), "utf8");
     } catch {
       // Non-fatal: the video still publishes, just without its own metadata.

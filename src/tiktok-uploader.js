@@ -315,6 +315,74 @@ async function setTikTokCover(page, coverPath) {
   return true;
 }
 
+/**
+ * Escribe un hashtag en el editor y selecciona la sugerencia que TikTok
+ * muestra en el desplegable. Si el hashtag se escribe "a mano" sin elegir la
+ * sugerencia, TikTok lo trata como texto plano y no cuenta como hashtag.
+ * Si no aparece ninguna sugerencia, se conserva el texto ya tecleado.
+ */
+async function typeHashtagAndSelect(page, hashtag) {
+  const token = String(hashtag || "").trim();
+  if (!/^#\S+$/.test(token)) return false;
+
+  // Se teclea el "#" y el resto del token carácter a carácter para que TikTok
+  // abra su desplegable de sugerencias igual que lo haría un usuario.
+  await page.keyboard.type(token, { delay: 45 });
+  await page.waitForTimeout(700);
+
+  const wanted = token.toLowerCase();
+  const picked = await page.evaluate((wantedNorm) => {
+    const norm = (v) => (v || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const optionSelectors = [
+      '[role="option"]',
+      '[role="listbox"] li',
+      'li[class*="option" i]',
+      '[class*="suggest" i] li',
+      '[class*="option" i]',
+      '[class*="hashtag" i] li',
+      'div[class*="Dropdown" i] li',
+    ];
+    const seen = new Set();
+    const options = [];
+    for (const selector of optionSelectors) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (el.offsetParent === null) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        if (seen.has(el)) continue;
+        seen.add(el);
+        options.push(el);
+      }
+    }
+    // Solo se consideran sugerencias de hashtags (deben empezar por "#").
+    const hashOptions = options.map((el) => {
+      const text = (el.textContent || "").trim();
+      const firstHash = (text.match(/#\S+/) || [""])[0].toLowerCase();
+      return { el, text, firstHash };
+    }).filter((o) => o.firstHash);
+
+    const pick = hashOptions.find((o) => o.firstHash === wantedNorm)
+      || hashOptions.find((o) => o.firstHash.startsWith(wantedNorm))
+      || hashOptions.find((o) => wantedNorm.startsWith(o.firstHash))
+      || null;
+    if (!pick) return null;
+    const rect = pick.el.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, text: pick.text };
+  }, wanted);
+
+  if (!picked) {
+    console.log(`No hashtag suggestion for ${token}; left as typed.`);
+    return false;
+  }
+
+  await page.mouse.click(picked.x, picked.y);
+  await page.waitForTimeout(350);
+  // Un espacio cierra el desplegable; TikTok lo absorbe al insertar el chip.
+  await page.keyboard.type(" ", { delay: 20 });
+  console.log(`Hashtag ${token} selected as "${picked.text}".`);
+  return true;
+}
+
 async function setCaption(page, caption) {
   if (!caption) {
     return;
@@ -337,7 +405,22 @@ async function setCaption(page, caption) {
       await target.click({ timeout: 8000 });
       await page.keyboard.press("Control+A");
       await page.keyboard.press("Delete");
-      await target.type(caption, { delay: 10 });
+
+      // Se separa el texto de los hashtags: el texto se teclea normal, pero
+      // cada hashtag se teclea y se elige su sugerencia del desplegable.
+      const parts = String(caption).split(/(#\S+)/g).filter((p) => p !== "");
+      for (let i = 0; i < parts.length; i += 1) {
+        const part = parts[i];
+        if (/^#\S+$/.test(part)) {
+          await typeHashtagAndSelect(page, part);
+        } else {
+          // Los espacios ya quedan cubiertos por el espacio que inserta
+          // typeHashtagAndSelect tras elegir la sugerencia; se omiten para
+          // no duplicarlos.
+          const text = part.replace(/^\s+/, "").replace(/\s+/g, " ");
+          if (text) await target.type(text, { delay: 10 });
+        }
+      }
       return;
     } catch {
       // Try the next candidate selector.
