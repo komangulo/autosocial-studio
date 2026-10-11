@@ -93,6 +93,7 @@ const UI = {
 
     ttQueueList: document.getElementById("ttQueueList"),
     ttQueueCount: document.getElementById("ttQueueCount"),
+    ttQueueClearBtn: document.getElementById("ttQueueClearBtn"),
     ttJobVideo: document.getElementById("ttJobVideo"),
     ttJobDate: document.getElementById("ttJobDate"),
     ttJobCaption: document.getElementById("ttJobCaption"),
@@ -334,6 +335,8 @@ const UI = {
     if (this.els.flowRunNowBtn) this.els.flowRunNowBtn.addEventListener("click", () => this.runFlowNow());
     if (this.els.flowOpenDownloadsBtn) this.els.flowOpenDownloadsBtn.addEventListener("click", () => this.openFlowDownloads());
     if (this.els.ttJobCreateBtn) this.els.ttJobCreateBtn.addEventListener("click", () => this.createAutonomousJob());
+    if (this.els.ttQueueClearBtn) this.els.ttQueueClearBtn.addEventListener("click", () => this.clearTikTokQueue());
+    if (this.els.ttQueueList) this.els.ttQueueList.addEventListener("click", (event) => this.handleQueueItemAction(event));
     if (this.els.autonomousJobsList) this.els.autonomousJobsList.addEventListener("click", (event) => this.handleJobAction(event));
     if (this.els.flowJobsList) this.els.flowJobsList.addEventListener("click", (event) => this.handleJobAction(event));
     ["flowFixedPromptTemplate", "flowDynamicInstructions", "flowEnabled", "flowVideosPerDay", "flowDailyTime", "flowTimezone", "flowPublicationTimes", "flowAutoPublish", "flowCaption"].forEach((key) => {
@@ -2105,6 +2108,7 @@ const UI = {
             ${item.hasCaption ? '<span class="queue-caption-badge"><i class="ph ph-text-align-left"></i> Caption</span>' : ''}
           </div>
           <span class="status-badge active queue-item-status">Pending</span>
+          <button class="control-btn-small danger queue-item-remove" data-queue-remove="${escapeHtml(item.name)}" title="Borrar de la cola"><i class="ph ph-trash"></i></button>
         </div>`).join("");
       if (single) return `<div class="queue-group open"><div class="queue-group-items">${rows}</div></div>`;
       return `
@@ -2538,6 +2542,15 @@ const UI = {
       if (action === "copy-email") {
         return;
       }
+      if (action === "rename") {
+        const row = button.closest("tr");
+        const currentName = row?.querySelector(".managed-account-name")?.textContent || accountId;
+        const name = prompt("Escribe el nuevo nombre para este perfil:", currentName);
+        if (name === null) return;
+        await API.post("/api/accounts/rename", { accountId, name });
+        await this.refresh();
+        return;
+      }
       if (action === "open") {
         await API.post("/api/account-manager/open-assisted", { accountId });
         await this.refresh();
@@ -2605,6 +2618,7 @@ const UI = {
             <td><span class="status-badge ${sessionSaved ? "active" : ""}">${sessionSaved ? "Saved" : "Not saved"}</span></td>
             <td><span class="status-badge ${sessionSaved ? "active" : ""}">${escapeHtml(status.replace(/-/g, " "))}</span></td>
             <td><div class="account-action-row">
+              <button class="control-btn-small" data-account-action="rename" data-account-id="${escapeHtml(account.id)}" title="Cambiar el nombre visible; conserva el perfil">Renombrar</button>
               <button class="control-btn-small" data-account-action="select" data-account-id="${escapeHtml(account.id)}" ${isActive ? "disabled" : ""}>${isActive ? "Selected" : "Select"}</button>
               <button class="control-btn-small" data-account-action="open" data-account-id="${escapeHtml(account.id)}"><i class="ph ph-browser"></i> Open signup</button>
               <!-- MARKER: BOTON-ELIMINAR-CUENTA -->
@@ -3034,6 +3048,33 @@ const UI = {
     } catch (error) {
       alert(error.message);
     } finally {
+      button.disabled = false;
+    }
+  },
+
+  // BORRAR-COLA-TIKTOK: borra TODA la cola pendiente de la cuenta activa.
+  async clearTikTokQueue() {
+    if (!confirm("¿Borrar TODOS los vídeos pendientes de la cola de TikTok de esta cuenta? Esta acción no se puede deshacer.")) return;
+    try {
+      await API.post("/api/tiktok/queue/clear", {});
+      await this.refresh();
+    } catch (error) {
+      alert(`No se pudo vaciar la cola: ${error.message}`);
+    }
+  },
+
+  // BORRAR-COLA-TIKTOK: borra UN vídeo de la cola (botón de la papelera por item).
+  async handleQueueItemAction(event) {
+    const button = event.target.closest("button[data-queue-remove]");
+    if (!button) return;
+    const videoName = button.dataset.queueRemove;
+    if (!confirm(`¿Borrar "${videoName}" de la cola de TikTok?`)) return;
+    button.disabled = true;
+    try {
+      await API.post("/api/tiktok/queue/remove", { videoName });
+      await this.refresh();
+    } catch (error) {
+      alert(`No se pudo borrar el vídeo: ${error.message}`);
       button.disabled = false;
     }
   },

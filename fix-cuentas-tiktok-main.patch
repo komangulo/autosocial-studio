@@ -1,0 +1,55 @@
+--- a/src/autoclone/index.js
++++ b/src/autoclone/index.js
+@@ -21,6 +21,25 @@
+     }
+   };
+ 
++  // AISLAR-CUENTAS-TIKTOK: resuelve la cuenta a usar. Si el frontend manda
++  // accountId, se valida y se usa ESA cuenta (la del perfil seleccionado); si
++  // no llega o no es valida, se cae a la cuenta activa (comportamiento previo).
++  // Sin esto, programar desde un perfil que NO es el activo se va a la cuenta
++  // activa global (p. ej. KapiBlue acababa programando en Madrid Nueva Modelo).
++  const resolveTikTokAccount = async (req) => {
++    const requested = req?.body?.accountId || req?.query?.accountId;
++    const validator = context.getAccount || context.requireAccount;
++    if (requested && typeof validator === "function") {
++      try {
++        const account = await validator(requested);
++        if (account?.id) return account;
++      } catch {
++        // accountId invalido: se cae a la cuenta activa.
++      }
++    }
++    return await context.getActiveAccount();
++  };
++
+   router.get("/health", route(async (req, res) => {
+     res.json({ ok: true, running: controller.running, jobId: controller.jobId });
+   }));
+@@ -88,7 +107,7 @@
+   // each one to the currently selected TikTok account. No daemon is involved.
+   router.post("/start-publish", route(async (req, res) => {
+     if (!context.getActiveAccount) throw new Error("No hay cuentas de TikTok disponibles.");
+-    const active = await context.getActiveAccount();
++    const active = await resolveTikTokAccount(req);
+     if (!active?.id) throw new Error("Elige una cuenta de TikTok destino en Cuentas.");
+     const {
+       username, lastPublishedUrl, maxVideos, destinationRoot, downloadThumbnail,
+@@ -242,7 +261,7 @@
+   router.post("/schedule", route(async (req, res) => {
+     const { folder, days, times, maxPerRun, timezone, captionTemplate, hashtags, location, aiGenerated } = req.body || {};
+     if (!context.getActiveAccount || !context.worker) throw new Error("El programador de TikTok no esta disponible.");
+-    const active = await context.getActiveAccount();
++    const active = await resolveTikTokAccount(req);
+     if (!active?.id) throw new Error("Elige una cuenta de TikTok en Cuentas.");
+     const result = await scheduler.scheduleFolder({
+       accountId: active.id,
+@@ -297,7 +316,7 @@
+     const { folder, days, times, maxPerRun, timezone, captionTemplate, hashtags, location, aiGenerated } = req.body || {};
+     if (!context.getActiveAccount || !context.worker) throw new Error("El programador de TikTok no esta disponible.");
+     if (startRun?.running) throw new Error("Ya hay una programacion en marcha. Espera a que termine.");
+-    const active = await context.getActiveAccount();
++    const active = await resolveTikTokAccount(req);
+     if (!active?.id) throw new Error("Elige una cuenta de TikTok en Cuentas.");
+ 
+     context.worker.clearCancellation?.();

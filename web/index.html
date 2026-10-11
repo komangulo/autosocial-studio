@@ -702,7 +702,10 @@
             <div class="card full-width queue-card">
               <div class="queue-card-header">
                 <div class="card-title">TikTok Queue</div>
-                <span id="ttQueueCount" class="status-badge queue-count">0 pending</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span id="ttQueueCount" class="status-badge queue-count">0 pending</span>
+                  <button id="ttQueueClearBtn" class="control-btn-small danger" title="Borrar todos los videos pendientes de esta cuenta"><i class="ph ph-trash"></i> Vaciar cola</button>
+                </div>
               </div>
               <div class="queue-list queue-list-tiktok" id="ttQueueList"></div>
             </div>

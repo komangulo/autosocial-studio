@@ -39,6 +39,7 @@ const {
 const {
   getState,
   addAccount,
+  renameAccount,
   selectAccount,
   getActiveAccount,
   getAllAccounts,
@@ -647,6 +648,58 @@ async function createServer() {
     }
   });
 
+  // BORRAR-COLA-TIKTOK: elimina de la cola de la cuenta activa. Todas las
+  // acciones usan la cuenta activa (o ?accountId=) para no tocar otras cuentas.
+  // Un "item" de la cola son los archivos de un video: el .mp4 y sus sidecars
+  // (.meta.json / .description / .txt) que el scheduler pushea a TikTok.
+  const queueVideoSidecars = (queueDir, videoName) => {
+    const base = videoName.replace(/\.[^.]+$/, "");
+    return [
+      path.join(queueDir, videoName),
+      path.join(queueDir, `${base}.meta.json`),
+      path.join(queueDir, `${base}.description`),
+      path.join(queueDir, `${base}.txt`),
+    ];
+  };
+
+  app.post("/api/tiktok/queue/remove", async (req, res) => {
+    try {
+      const requested = req.body?.accountId || req.query?.accountId;
+      const active = requested && typeof requireAccount === "function"
+        ? await requireAccount(requested)
+        : await getActiveAccount();
+      const videoName = path.basename(String(req.body?.videoName || ""));
+      if (!videoName) throw new Error("Video no valido.");
+      const queueDir = getAccountQueueDirs(active.id).tiktok.pending;
+      let removed = 0;
+      for (const filePath of queueVideoSidecars(queueDir, videoName)) {
+        try { await fs.rm(filePath, { force: true }); removed += 1; } catch { /* no existia */ }
+      }
+      res.json({ ok: true, accountId: active.id, videoName, removed });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/api/tiktok/queue/clear", async (req, res) => {
+    try {
+      const requested = req.body?.accountId || req.query?.accountId;
+      const active = requested && typeof requireAccount === "function"
+        ? await requireAccount(requested)
+        : await getActiveAccount();
+      const queueDir = getAccountQueueDirs(active.id).tiktok.pending;
+      let files = [];
+      try { files = await fs.readdir(queueDir); } catch { files = []; }
+      let removed = 0;
+      for (const name of files) {
+        try { await fs.rm(path.join(queueDir, name), { force: true }); removed += 1; } catch { /* */ }
+      }
+      res.json({ ok: true, accountId: active.id, removed });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
   app.post("/api/jobs/:id/retry", async (req, res) => {
     try {
       const active = await getActiveAccount();
@@ -945,6 +998,17 @@ async function createServer() {
       await getDaemons(account.id);
       const state = await getState();
       res.json({ ok: true, account, state });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/api/accounts/rename", async (req, res) => {
+    try {
+      const account = await renameAccount(req.body?.accountId, req.body?.name);
+      const state = await getState();
+      const active = await getActiveAccount();
+      res.json({ ok: true, account, state, activeAccount: active });
     } catch (error) {
       res.status(400).json({ ok: false, error: error.message });
     }

@@ -21,6 +21,31 @@ function createAutoCloneRouter(express, context = {}) {
     }
   };
 
+  // PATCH-TIKTOK-ACCOUNT-FROM-REQUEST-v2
+  // El frontend (web/autopost.js withAccount()) SIEMPRE envia la cuenta
+  // seleccionada en el body como accountId. Antes las rutas ignoraban ese dato
+  // y usaban la cuenta "activa" global (accounts-state.json), que puede estar
+  // desincronizada: por eso al programar/subir salia SIEMPRE la misma cuenta
+  // (p. ej. madrid-nueva-modelo) aunque la UI mostrara capybluh.
+  // Prioridad: body.accountId > query.accountId > cuenta activa global.
+  const resolveTikTokAccount = async (req) => {
+    const candidate = String(
+      (req.body && (req.body.accountId || req.body.publishAccountId)) ||
+      (req.query && req.query.accountId) ||
+      ""
+    ).trim();
+    if (candidate) {
+      try {
+        return await require("../account-manager").requireAccount(candidate);
+      } catch (error) {
+        // Cuenta invalida o borrada: seguimos con la activa, pero avisamos.
+        console.warn(`resolveTikTokAccount: ${candidate} no valida (${error.message}); uso la activa.`);
+      }
+    }
+    if (!context.getActiveAccount) return null;
+    return context.getActiveAccount();
+  };
+
   router.get("/health", route(async (req, res) => {
     res.json({ ok: true, running: controller.running, jobId: controller.jobId });
   }));
@@ -87,8 +112,7 @@ function createAutoCloneRouter(express, context = {}) {
   // Manual incremental mode: download videos newer than the marker and publish
   // each one to the currently selected TikTok account. No daemon is involved.
   router.post("/start-publish", route(async (req, res) => {
-    if (!context.getActiveAccount) throw new Error("No hay cuentas de TikTok disponibles.");
-    const active = await context.getActiveAccount();
+    const active = await resolveTikTokAccount(req);
     if (!active?.id) throw new Error("Elige una cuenta de TikTok destino en Cuentas.");
     const {
       username, lastPublishedUrl, maxVideos, destinationRoot, downloadThumbnail,
@@ -241,8 +265,8 @@ function createAutoCloneRouter(express, context = {}) {
 
   router.post("/schedule", route(async (req, res) => {
     const { folder, days, times, maxPerRun, timezone, captionTemplate, hashtags, location, aiGenerated } = req.body || {};
-    if (!context.getActiveAccount || !context.worker) throw new Error("El programador de TikTok no esta disponible.");
-    const active = await context.getActiveAccount();
+    if (!context.worker) throw new Error("El programador de TikTok no esta disponible.");
+    const active = await resolveTikTokAccount(req);
     if (!active?.id) throw new Error("Elige una cuenta de TikTok en Cuentas.");
     const result = await scheduler.scheduleFolder({
       accountId: active.id,
@@ -295,9 +319,9 @@ function createAutoCloneRouter(express, context = {}) {
 
   router.post("/schedule/start", route(async (req, res) => {
     const { folder, days, times, maxPerRun, timezone, captionTemplate, hashtags, location, aiGenerated } = req.body || {};
-    if (!context.getActiveAccount || !context.worker) throw new Error("El programador de TikTok no esta disponible.");
+    if (!context.worker) throw new Error("El programador de TikTok no esta disponible.");
     if (startRun?.running) throw new Error("Ya hay una programacion en marcha. Espera a que termine.");
-    const active = await context.getActiveAccount();
+    const active = await resolveTikTokAccount(req);
     if (!active?.id) throw new Error("Elige una cuenta de TikTok en Cuentas.");
 
     context.worker.clearCancellation?.();

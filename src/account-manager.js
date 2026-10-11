@@ -148,6 +148,23 @@ async function addAccount(name) {
   return clone(account);
 }
 
+async function renameAccount(accountId, name) {
+  await ensureLoaded();
+  const safeId = assertSafeAccountId(accountId);
+  const account = state.accounts.find((item) => item.id === safeId);
+  if (!account) throw new Error("Account not found.");
+
+  const cleanName = sanitizeName(name);
+  if (!cleanName) throw new Error("Account name is required.");
+  if (state.accounts.some((item) => item.id !== safeId && item.name.toLowerCase() === cleanName.toLowerCase())) {
+    throw new Error("Another account already uses this name.");
+  }
+
+  account.name = cleanName;
+  await saveState();
+  return clone(account);
+}
+
 async function selectAccount(accountId) {
   await ensureLoaded();
   const target = state.accounts.find((item) => item.id === accountId);
@@ -218,6 +235,10 @@ async function getPlatformProfileDir(platform, accountId) {
 async function hasSavedPlatformSession(platform, accountId) {
   const profileDir = await getPlatformProfileDir(platform, accountId);
   const cookieCandidates = [
+    // Chromium moderno guarda las cookies AQUI (carpeta "Default" + "Network").
+    // Sin esta ruta, hasSavedPlatformSession() devolvia saved:false aunque la
+    // sesion existiera, y la subida no reconocia la cuenta.
+    path.resolve(profileDir, "Default", "Network", "Cookies"),
     path.resolve(profileDir, "Default", "Cookies"),
     path.resolve(profileDir, "Cookies"),
     path.resolve(profileDir, "Network", "Cookies"),
@@ -240,6 +261,7 @@ async function hasSavedPlatformSession(platform, accountId) {
 module.exports = {
   getState,
   addAccount,
+  renameAccount,
   selectAccount,
   getActiveAccount,
   getAllAccounts,

@@ -971,6 +971,12 @@ textarea.control-input {
   flex: 1;
 }
 
+.queue-item-remove {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  line-height: 1;
+}
+
 .queue-item-icon {
   display: inline-flex;
   align-items: center;
