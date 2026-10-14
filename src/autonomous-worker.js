@@ -194,7 +194,7 @@ class AutonomousWorker {
    * folder is scheduled on TikTok in a single session instead of waiting on the
    * poll.
    */
-  async drainTikTokQueue({ maxJobs = 100, onJob } = {}) {
+  async drainTikTokQueue({ maxJobs = 100, onJob, accountId, jobIds } = {}) {
     // MARKER: TIKTOK-LANE-EXCLUSIVE-v1
     // Mientras este bucle drena, el temporizador NO debe lanzar otro job de
     // TikTok: si no, se abren DOS Chrome sobre el mismo perfil y el segundo
@@ -204,6 +204,8 @@ class AutonomousWorker {
       return { processed: 0, published: 0, failed: 0, skipped: true };
     }
     this.laneBusy["tiktok-publish"] = true;
+    const wasDraining = this.draining;
+    this.draining = true;
     this.clearCancellation();
     let processed = 0;
     let published = 0;
@@ -213,7 +215,7 @@ class AutonomousWorker {
     try {
       while (processed < maxJobs) {
         if (this.isCancelled()) break;
-        const job = await this.store.claimDue(new Date(), { type: "tiktok-publish" });
+        const job = await this.store.claimDue(new Date(), { type: "tiktok-publish", accountId, jobIds });
         if (!job) break;
         await onJob?.(job);
         if (this.isCancelled()) {
@@ -237,6 +239,7 @@ class AutonomousWorker {
       }
     } finally {
       this.laneBusy["tiktok-publish"] = false;
+      this.draining = wasDraining;
     }
     // Resumen honesto: antes se devolvia solo un numero y el mensaje final
     // decia "N programados" aunque hubieran fallado.

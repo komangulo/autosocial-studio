@@ -472,6 +472,26 @@ test("autopost buildPlan maps one video per slot in order", () => {
   assert.equal(plan[2].videoName, "c.mp4");
 });
 
+test("bulk AutoPost starts after the latest confirmed slot and stays within three daily times", () => {
+  const sched = require("../src/autoclone/scheduler");
+  const { DateTime } = require("luxon");
+  const now = DateTime.fromISO("2026-10-13T08:00:00", { zone: "Europe/Madrid" });
+  const slots = sched.nextSlots({
+    days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+    times: ["09:30", "17:40", "22:20"],
+    timezone: "Europe/Madrid",
+    count: 4,
+    now,
+    after: "2026-10-13T07:30:00.000Z", // Tuesday at 09:30 in Madrid.
+  });
+  assert.deepEqual(slots.map((slot) => slot.local), [
+    "2026-10-13 17:40",
+    "2026-10-13 22:20",
+    "2026-10-14 09:30",
+    "2026-10-14 17:40",
+  ]);
+});
+
 test("tiktok schedule date/time use the Web Studio format", () => {
   const { _private } = require("../src/tiktok-uploader");
   const date = new Date(2026, 8, 12, 20, 5);

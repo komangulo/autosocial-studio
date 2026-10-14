@@ -130,10 +130,13 @@ class JobStore {
 
   async claimDue(now = new Date(), filters = {}) {
     const dueAt = now.getTime();
+    const jobIds = Array.isArray(filters.jobIds) ? new Set(filters.jobIds.map(String)) : null;
     return this._mutate((state) => {
       const job = state.jobs
         .filter((item) => ["scheduled", "retry"].includes(item.status))
         .filter((item) => !filters.type || item.type === filters.type)
+        .filter((item) => !filters.accountId || item.accountId === filters.accountId)
+        .filter((item) => !jobIds || jobIds.has(item.id))
         .filter((item) => new Date(item.scheduledAt).getTime() <= dueAt)
         .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))[0];
       if (!job) return null;

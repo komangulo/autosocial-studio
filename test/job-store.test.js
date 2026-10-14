@@ -27,6 +27,21 @@ test("jobs persist and are claimed once", async (t) => {
   assert.equal((await reopened.getJob(job.id)).status, "running");
 });
 
+test("claimDue can restrict work to an account and an explicit job list", async (t) => {
+  const { store } = await createStore(t);
+  const due = new Date(0);
+  const wanted = await store.createJob({ type: "tiktok-publish", accountId: "account-a", scheduledAt: due });
+  await store.createJob({ type: "tiktok-publish", accountId: "account-b", scheduledAt: due });
+  const otherJob = await store.createJob({ type: "tiktok-publish", accountId: "account-a", scheduledAt: due });
+
+  const claimed = await store.claimDue(new Date(), { type: "tiktok-publish", accountId: "account-a", jobIds: [otherJob.id] });
+  assert.equal(claimed.id, otherJob.id);
+  const next = await store.claimDue(new Date(), { type: "tiktok-publish", accountId: "account-a", jobIds: [wanted.id] });
+  assert.equal(next.id, wanted.id);
+  assert.equal((await store.getJob(next.id)).status, "running");
+  assert.equal((await store.listJobs({ accountId: "account-b" }))[0].status, "scheduled");
+});
+
 test("daily dedupe keys prevent duplicate jobs", async (t) => {
   const { store } = await createStore(t);
   const first = await store.createJob({ type: "flow-generate", accountId: "a", scheduledAt: new Date(), dedupeKey: "flow:a:2026-01-01" });

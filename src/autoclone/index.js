@@ -6,12 +6,23 @@ const fs = require("fs");
 const path = require("path");
 const { getAutoCloneController } = require("./controller");
 const scheduler = require("./scheduler");
+const { getAllAccounts, hasSavedPlatformSession } = require("../account-manager");
+const { closeSharedTikTokBrowser } = require("../tiktok-uploader");
+
+const BULK_TIMES = ["09:30", "17:40", "22:20"];
+const EVERY_DAY = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "uncertain", "cancelled"]);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function createAutoCloneRouter(express, context = {}) {
   const router = express.Router();
   const controller = getAutoCloneController();
   let lastSchedule = null;
   let startRun = null;
+  let bulkRun = null;
 
   const route = (handler) => async (req, res) => {
     try {
@@ -286,7 +297,7 @@ function createAutoCloneRouter(express, context = {}) {
   }));
 
   router.get("/schedule/status", route(async (req, res) => {
-    res.json({ ok: true, lastSchedule, startRun });
+    res.json({ ok: true, lastSchedule, startRun, bulkRun });
   }));
 
   router.get("/schedule/log", route(async (req, res) => {
@@ -320,7 +331,7 @@ function createAutoCloneRouter(express, context = {}) {
   router.post("/schedule/start", route(async (req, res) => {
     const { folder, days, times, maxPerRun, timezone, captionTemplate, hashtags, location, aiGenerated } = req.body || {};
     if (!context.worker) throw new Error("El programador de TikTok no esta disponible.");
-    if (startRun?.running) throw new Error("Ya hay una programacion en marcha. Espera a que termine.");
+    if (startRun?.running || bulkRun?.running) throw new Error("Ya hay una programacion en marcha. Espera a que termine.");
     const active = await resolveTikTokAccount(req);
     if (!active?.id) throw new Error("Elige una cuenta de TikTok en Cuentas.");
 
@@ -400,6 +411,190 @@ function createAutoCloneRouter(express, context = {}) {
     res.json({ ok: true, started: true, accountId: active.id, run });
   }));
 
+  router.post("/schedule/all/start", route(async (req, res) => {
+    if (!context.worker) throw new Error("El programador de TikTok no esta disponible.");
+    if (startRun?.running || bulkRun?.running) throw new Error("Ya hay una programacion en marcha. Espera a que termine.");
+    const settingsByAccount = req.body?.settingsByAccount;
+    if (!settingsByAccount || typeof settingsByAccount !== "object" || Array.isArray(settingsByAccount)) {
+      throw new Error("No se recibieron las carpetas AutoPost guardadas por cuenta.");
+    }
+    const timezone = String(req.body?.timezone || require("../config").config.timezone || "UTC");
+    const accounts = await getAllAccounts();
+    if (!accounts.length) throw new Error("No hay cuentas registradas.");
+
+    context.worker.clearCancellation?.();
+    context.worker.draining = true;
+    context.worker.start?.({ force: true });
+    bulkRun = {
+      running: true,
+      startedAt: new Date().toISOString(),
+      timezone,
+      totalAccounts: accounts.length,
+      currentAccountId: null,
+      currentVideoName: null,
+      done: 0,
+      failedVideos: 0,
+      accounts: accounts.map((account) => ({
+        accountId: account.id,
+        name: account.name || account.id,
+        status: "pending",
+        total: 0,
+        published: 0,
+        error: null,
+      })),
+      cancelled: false,
+      error: null,
+      finishedAt: null,
+    };
+
+    const run = bulkRun;
+    void runBulkAutoPost({ run, accounts, settingsByAccount, timezone, worker: context.worker });
+    res.json({ ok: true, started: true, run });
+  }));
+
+  async function runBulkAutoPost({ run, accounts, settingsByAccount, timezone, worker }) {
+    const startedAt = Date.now();
+    try {
+      while (worker.laneBusy?.["tiktok-publish"] && !run.cancelled && Date.now() - startedAt < 15 * 60_000) {
+        await sleep(250);
+      }
+      if (worker.laneBusy?.["tiktok-publish"] && !run.cancelled) {
+        throw new Error("Hay otra publicacion de TikTok activa y no se pudo esperar a que terminara.");
+      }
+
+      for (const account of accounts) {
+        if (run.cancelled) break;
+        const accountRun = run.accounts.find((item) => item.accountId === account.id);
+        run.currentAccountId = account.id;
+        accountRun.status = "processing";
+        const settings = settingsByAccount[account.id] || {};
+        const folder = String(settings.folder || settings.destination || "").trim();
+
+        try {
+          if (!folder) {
+            accountRun.status = "skipped";
+            accountRun.error = "No tiene una carpeta AutoPost guardada.";
+            continue;
+          }
+          if (!(await hasSavedPlatformSession("tiktok", account.id))) {
+            accountRun.status = "skipped";
+            accountRun.error = "No hay una sesion de TikTok guardada.";
+            continue;
+          }
+
+          const jobs = await worker.store.listJobs({ accountId: account.id, type: "tiktok-publish", limit: 500 });
+          const autopostJobs = jobs.filter((job) => ["autoclone-schedule", "autoclone-bulk"].includes(job.payload?.source));
+          if (autopostJobs.some((job) => ["preparing", "scheduled", "retry", "running", "cancelling"].includes(job.status))) {
+            throw new Error("Tiene un job AutoPost sin terminar. Revísalo antes de iniciar otro lote.");
+          }
+          if (autopostJobs.some((job) => job.status === "uncertain")) {
+            throw new Error("Tiene una publicación AutoPost incierta. Comprueba TikTok para evitar duplicados.");
+          }
+
+          const sourceDir = path.resolve(folder);
+          const postingState = await scheduler.readPostingState(account.id, sourceDir);
+          let videos = await scheduler.listVideos(sourceDir);
+          if (postingState.lastPublishedName) {
+            const lastIndex = videos.findIndex((filePath) => path.basename(filePath) === postingState.lastPublishedName);
+            if (lastIndex >= 0) videos = videos.slice(lastIndex + 1);
+          }
+          const failedNames = new Set(postingState.failedNames || []);
+          const completedKeys = new Set(autopostJobs
+            .filter((job) => job.status !== "cancelled" && job.dedupeKey)
+            .map((job) => job.dedupeKey));
+          videos = videos.filter((filePath) => {
+            const name = path.basename(filePath);
+            return !failedNames.has(name) && !completedKeys.has(scheduler.autopostDedupeKey(account.id, sourceDir, name));
+          }).slice(0, 9);
+          accountRun.total = videos.length;
+          run.totalVideos = (run.totalVideos || 0) + videos.length;
+          if (!videos.length) {
+            accountRun.status = "empty";
+            accountRun.error = "No hay vídeos nuevos pendientes.";
+            continue;
+          }
+
+          let lastScheduledAt = autopostJobs
+            .filter((job) => job.status === "succeeded" && job.payload?.nativeScheduledAt)
+            .map((job) => job.payload.nativeScheduledAt)
+            .filter((value) => Number.isFinite(Date.parse(value)))
+            .sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null;
+          for (const videoPath of videos) {
+            if (run.cancelled) break;
+            const videoName = path.basename(videoPath);
+            run.currentVideoName = videoName;
+            const result = await scheduler.scheduleFolder({
+              accountId: account.id,
+              folder: sourceDir,
+              videos: [videoPath],
+              days: EVERY_DAY,
+              times: BULK_TIMES,
+              maxPerRun: 1,
+              timezone,
+              after: lastScheduledAt,
+              captionTemplate: String(settings.caption || ""),
+              hashtags: settings.hashtags || [],
+              location: settings.locationMadrid ? "Madrid, Spain" : String(settings.location || settings.locationCustom || ""),
+              aiGenerated: Boolean(settings.aiGenerated),
+              worker,
+              deferArchive: true,
+              keepInPlace: true,
+            });
+            const created = result.created?.[0];
+            if (!created?.jobId) throw new Error(`No se pudo preparar ${videoName} para TikTok.`);
+            accountRun.lastScheduledAt = created.local;
+
+            while (worker.laneBusy?.["tiktok-publish"] && !run.cancelled) await sleep(250);
+            if (run.cancelled) break;
+            const drained = await worker.drainTikTokQueue({
+              maxJobs: 1,
+              accountId: account.id,
+              jobIds: [created.jobId],
+              onJob: (job) => { run.currentVideoName = job.payload?.videoName || videoName; },
+            });
+            const job = await worker.store.getJob(created.jobId);
+            if (run.cancelled) break;
+            if (drained.skipped || !job || !TERMINAL_JOB_STATUSES.has(job.status)) {
+              throw new Error(`El job de ${videoName} no llegó a un resultado confirmado.`);
+            }
+            const finalized = await scheduler.finalizeSchedule({
+              accountId: account.id,
+              folder: sourceDir,
+              created: [created],
+              worker,
+              keepInPlace: true,
+            });
+            if (job.status !== "succeeded" || finalized.published !== 1) {
+              run.failedVideos += 1;
+              throw new Error(job.status === "uncertain"
+                ? `El resultado de ${videoName} es incierto. Comprueba TikTok antes de reintentar.`
+                : `TikTok no confirmó ${videoName}: ${job.error || job.status}.`);
+            }
+            lastScheduledAt = created.at;
+            accountRun.published += 1;
+            run.done += 1;
+          }
+          if (!run.cancelled) accountRun.status = "completed";
+          else accountRun.status = "stopped";
+        } catch (error) {
+          accountRun.status = "failed";
+          accountRun.error = error.message;
+        } finally {
+          await closeSharedTikTokBrowser().catch(() => {});
+        }
+      }
+    } catch (error) {
+      run.error = error.message;
+    } finally {
+      run.currentAccountId = null;
+      run.currentVideoName = null;
+      run.running = false;
+      run.cancelled = Boolean(run.cancelled || worker.isCancelled?.());
+      run.finishedAt = new Date().toISOString();
+      worker.draining = false;
+    }
+  }
+
   router.post("/schedule/stop", route(async (req, res) => {
     if (!context.worker) throw new Error("El programador de TikTok no esta disponible.");
     context.worker.stop();
@@ -408,7 +603,10 @@ function createAutoCloneRouter(express, context = {}) {
       startRun.running = false;
       startRun.finishedAt = new Date().toISOString();
     }
-    res.json({ ok: true, stopped: true, run: startRun });
+    if (bulkRun) {
+      bulkRun.cancelled = true;
+    }
+    res.json({ ok: true, stopped: true, run: startRun, bulkRun });
   }));
 
   return router;

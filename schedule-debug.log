@@ -1,20 +1,20 @@
-2026-10-10T15:34:35.406Z setNativeSchedule target=2026-10-13T20:20:00.000Z tz=Europe/Madrid
-2026-10-10T15:34:36.931Z schedule mode enabled; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"17:50","readonly":true},{"tag":"input","value":"2026-10-10","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
-2026-10-10T15:34:36.938Z found 2 control(s): [{"kind":"time","index":24,"x":386,"y":1031,"text":"17:50","tag":"input","role":"","readonly":true},{"kind":"date","index":25,"x":578,"y":1031,"text":"2026-10-10","tag":"input","role":"","readonly":true}]
-2026-10-10T15:34:36.943Z attempt 1: want time=22:20 date=2026-10-13; controls=[{"kind":"time","index":24,"x":386,"y":1031,"text":"17:50","tag":"input","role":"","readonly":true},{"kind":"date","index":25,"x":578,"y":1031,"text":"2026-10-10","tag":"input","role":"","readonly":true}]
-2026-10-10T15:34:37.663Z   time: panel did not open (state={"found":true,"visible":false,"text":":000102030405060708091011121314151617181920212223000510152025303540455055"})
-2026-10-10T15:34:38.381Z   time: panel did not open (state={"found":true,"visible":false,"text":":000102030405060708091011121314151617181920212223000510152025303540455055"})
-2026-10-10T15:34:39.891Z   after time: ok=false; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"17:50","readonly":false},{"tag":"input","value":"2026-10-10","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
-2026-10-10T15:34:40.618Z   date: open attempt 1 at (578,533.953125)
-2026-10-10T15:34:40.624Z   date: iteration 1 header={"month":10,"year":2026}
-2026-10-10T15:34:41.147Z   date: clicked day 13 -> true
-2026-10-10T15:34:41.156Z   after date: ok=true; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"17:50","readonly":false},{"tag":"input","value":"2026-10-13","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
-2026-10-10T15:34:42.102Z attempt 1 readback: time=17:50 date=2026-10-13 match=false
-2026-10-10T15:34:42.623Z attempt 2: want time=22:20 date=2026-10-13; controls=[{"kind":"time","index":24,"x":386,"y":534,"text":"17:50","tag":"input","role":"","readonly":false},{"kind":"date","index":25,"x":578,"y":534,"text":"2026-10-13","tag":"input","role":"","readonly":true}]
-2026-10-10T15:34:45.928Z   time: hour 22 ok=true, minute 20 ok=true, panelClosed=true
-2026-10-10T15:34:45.934Z   after time: ok=true; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"22:20","readonly":false},{"tag":"input","value":"2026-10-13","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
-2026-10-10T15:34:46.666Z   date: open attempt 1 at (578,533.953125)
-2026-10-10T15:34:46.671Z   date: iteration 1 header={"month":10,"year":2026}
-2026-10-10T15:34:47.136Z   date: clicked day 13 -> true
-2026-10-10T15:34:47.144Z   after date: ok=true; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"22:20","readonly":false},{"tag":"input","value":"2026-10-13","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
-2026-10-10T15:34:48.057Z attempt 2 readback: time=22:20 date=2026-10-13 match=true
+2026-10-12T19:28:05.281Z setNativeSchedule target=2026-10-16T20:20:00.000Z tz=Europe/Madrid
+2026-10-12T19:28:06.798Z schedule mode enabled; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"21:45","readonly":true},{"tag":"input","value":"2026-10-12","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
+2026-10-12T19:28:06.802Z found 2 control(s): [{"kind":"time","index":24,"x":386,"y":1031,"text":"21:45","tag":"input","role":"","readonly":true},{"kind":"date","index":25,"x":578,"y":1031,"text":"2026-10-12","tag":"input","role":"","readonly":true}]
+2026-10-12T19:28:06.805Z attempt 1: want time=22:20 date=2026-10-16; controls=[{"kind":"time","index":24,"x":386,"y":1031,"text":"21:45","tag":"input","role":"","readonly":true},{"kind":"date","index":25,"x":578,"y":1031,"text":"2026-10-12","tag":"input","role":"","readonly":true}]
+2026-10-12T19:28:07.538Z   time: panel did not open (state={"found":true,"visible":false,"text":":000102030405060708091011121314151617181920212223000510152025303540455055"})
+2026-10-12T19:28:08.262Z   time: panel did not open (state={"found":true,"visible":false,"text":":000102030405060708091011121314151617181920212223000510152025303540455055"})
+2026-10-12T19:28:09.761Z   after time: ok=false; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"21:45","readonly":false},{"tag":"input","value":"2026-10-12","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
+2026-10-12T19:28:10.612Z   date: open attempt 1 at (578,533.953125)
+2026-10-12T19:28:10.619Z   date: iteration 1 header={"month":10,"year":2026}
+2026-10-12T19:28:11.140Z   date: clicked day 16 -> true
+2026-10-12T19:28:11.151Z   after date: ok=true; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"21:45","readonly":false},{"tag":"input","value":"2026-10-16","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
+2026-10-12T19:28:12.061Z attempt 1 readback: time=21:45 date=2026-10-16 match=false
+2026-10-12T19:28:12.577Z attempt 2: want time=22:20 date=2026-10-16; controls=[{"kind":"time","index":24,"x":386,"y":534,"text":"21:45","tag":"input","role":"","readonly":false},{"kind":"date","index":25,"x":578,"y":534,"text":"2026-10-16","tag":"input","role":"","readonly":true}]
+2026-10-12T19:28:15.864Z   time: hour 22 ok=true, minute 20 ok=true, panelClosed=true
+2026-10-12T19:28:15.871Z   after time: ok=true; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"22:20","readonly":false},{"tag":"input","value":"2026-10-16","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
+2026-10-12T19:28:16.604Z   date: open attempt 1 at (578,533.953125)
+2026-10-12T19:28:16.610Z   date: iteration 1 header={"month":10,"year":2026}
+2026-10-12T19:28:17.087Z   date: clicked day 16 -> true
+2026-10-12T19:28:17.105Z   after date: ok=true; state={"inputs":[{"tag":"input","value":"","readonly":false},{"tag":"input","value":"22:20","readonly":false},{"tag":"input","value":"2026-10-16","readonly":true},{"tag":"input","value":"on","readonly":false},{"tag":"input","value":"on","readonly":false}],"panels":{"timepicker":false,"calendar":false},"scheduleRadioChecked":true}
+2026-10-12T19:28:18.022Z attempt 2 readback: time=22:20 date=2026-10-16 match=true

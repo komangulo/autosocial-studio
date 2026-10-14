@@ -105,9 +105,13 @@ async function listVideos(folder) {
  * days: array of "mon".."sun" (empty = every day)
  * times: array of "HH:MM"
  */
-function nextSlots({ days = [], times = [], timezone = "UTC", count = 1, now = DateTime.now() } = {}) {
+function nextSlots({ days = [], times = [], timezone = "UTC", count = 1, now = DateTime.now(), after = null } = {}) {
   const zone = timezone || "UTC";
   const localNow = now.setZone(zone);
+  const afterDate = after
+    ? (DateTime.isDateTime(after) ? after : DateTime.fromJSDate(new Date(after), { zone }))
+    : null;
+  if (afterDate && !afterDate.isValid) throw new Error("La fecha de referencia para AutoPost no es valida.");
   const wantedDays = (days.length ? days : WEEKDAYS).map((d) => String(d).toLowerCase());
   const wantedTimes = (times.length ? times : ["12:00"])
     .map((t) => String(t).trim())
@@ -129,7 +133,7 @@ function nextSlots({ days = [], times = [], timezone = "UTC", count = 1, now = D
     if (wantedDays.includes(dayKey)) {
       for (const time of wantedTimes) {
         const candidate = day.set({ hour: time.hour, minute: time.minute, second: 0, millisecond: 0 });
-        if (candidate >= earliest) {
+        if (candidate >= earliest && (!afterDate || candidate > afterDate.setZone(zone))) {
           slots.push({
             at: candidate.toUTC().toISO(),
             local: candidate.toFormat("yyyy-LL-dd HH:mm"),
@@ -168,7 +172,7 @@ function buildPlan(videos, slots) {
  *   worker: AutonomousWorker instance, deferArchive? (manual AutoPost run)
  *   onProgress({ current, total, videoName, at })
  */
-async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false, keepInPlace = true } = {}) {
+async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRun = 0, timezone, after = null, captionTemplate = "", hashtags = [], location = "", aiGenerated = false, worker, onProgress, deferArchive = false, keepInPlace = true } = {}) {
   if (!worker) throw new Error("Falta el trabajador autonomo de TikTok.");
   const sourceDir = path.resolve(String(folder || ""));
   let files = Array.isArray(videos) && videos.length ? videos : await listVideos(sourceDir);
@@ -193,7 +197,7 @@ async function scheduleFolder({ accountId, folder, videos, days, times, maxPerRu
   await fs.mkdir(dirs.pending, { recursive: true });
 
   const timezone2 = timezone || config.timezone || "UTC";
-  const slots = nextSlots({ days, times, timezone: timezone2, count: files.length });
+  const slots = nextSlots({ days, times, timezone: timezone2, count: files.length, after });
   if (!slots.length) throw new Error("No se pudo calcular ninguna fecha futura con esos dias y horas.");
 
   const created = [];
@@ -452,6 +456,7 @@ async function uniqueName(dir, desired) {
 
 module.exports = {
   listVideos,
+  autopostDedupeKey,
   orderVideos,
   nextSlots,
   buildPlan,

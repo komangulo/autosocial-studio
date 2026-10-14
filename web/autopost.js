@@ -19,6 +19,7 @@
     previewBtn: $("apPreviewBtn"),
     scheduleBtn: $("apScheduleBtn"),
     startBtn: $("apStartBtn"),
+    bulkStartBtn: $("apBulkStartBtn"),
     stopBtn: $("apStopBtn"),
     logBtn: $("apLogBtn"),
     logCopyBtn: $("apLogCopyBtn"),
@@ -310,6 +311,7 @@
   }
 
   let startPollTimer = null;
+  let bulkPollTimer = null;
 
   function renderStartProgress(run) {
     if (!run) return;
@@ -329,6 +331,7 @@
     if (!selectedTimes().length) { setMessage("Escribe al menos una hora (ej. 10:00).", "error"); return; }
 
     els.startBtn.disabled = true;
+    if (els.bulkStartBtn) els.bulkStartBtn.disabled = true;
     setMessage("Iniciando… la app irá subiendo y programando cada vídeo en TikTok uno detrás de otro.");
     try {
       const data = await API.post("/api/autoclone/schedule/start", withAccount({
@@ -353,6 +356,7 @@
             clearInterval(startPollTimer);
             startPollTimer = null;
             els.startBtn.disabled = false;
+            if (els.bulkStartBtn) els.bulkStartBtn.disabled = false;
             if (run?.error) setMessage(`Terminó con un error: ${run.error}`, "error");
             else {
               // TIKTOK-HONEST-SUMMARY-v2: informar de lo que REALMENTE se subio.
@@ -375,27 +379,111 @@
           clearInterval(startPollTimer);
           startPollTimer = null;
           els.startBtn.disabled = false;
+          if (els.bulkStartBtn) els.bulkStartBtn.disabled = false;
           setMessage(error.message, "error");
         }
       }, 2500);
     } catch (error) {
       els.startBtn.disabled = false;
+      if (els.bulkStartBtn) els.bulkStartBtn.disabled = false;
       setMessage(error.message, "error");
     }
   }
 
   async function stopNow() {
     els.stopBtn.disabled = true;
-    setMessage("Parando… no se abrirán más ventanas.");
+    setMessage("Parando… el vídeo que ya está en curso puede terminar primero.");
     try {
       await API.post("/api/autoclone/schedule/stop", {});
       if (startPollTimer) { clearInterval(startPollTimer); startPollTimer = null; }
       els.startBtn.disabled = false;
-      setMessage("Parado. Al reabrir la app NO se reanudará solo. Pulsa «Programar todo» para volver a empezar.", "ok");
+      if (bulkPollTimer) {
+        setMessage("Parada solicitada. Esperando a que termine el vídeo actual…");
+      } else {
+        setMessage("Parado. Al reabrir la app NO se reanudará solo. Pulsa «Programar cuenta actual» para volver a empezar.", "ok");
+      }
     } catch (error) {
       setMessage(error.message, "error");
     } finally {
       els.stopBtn.disabled = false;
+    }
+  }
+
+  function accountSettingsForBulk() {
+    try {
+      const saved = JSON.parse(localStorage.getItem("autosocial.accountSettings.v1") || "{}");
+      return Object.fromEntries(Object.entries(saved).map(([accountId, settings]) => [accountId, {
+        folder: settings?.folder || settings?.destination || "",
+        caption: settings?.caption || "",
+        hashtags: settings?.hashtags || "",
+        locationMadrid: Boolean(settings?.locationMadrid),
+        locationCustom: settings?.locationCustom || "",
+        aiGenerated: Boolean(settings?.aiGenerated),
+      }]));
+    } catch {
+      return {};
+    }
+  }
+
+  function renderBulkProgress(run) {
+    if (!run) return;
+    const active = run.accounts?.find((account) => account.accountId === run.currentAccountId);
+    const totalVideos = Number(run.totalVideos) || 0;
+    const parts = [`${run.done || 0}/${totalVideos} vídeos confirmados`, `${run.totalAccounts || 0} cuentas`];
+    if (active) parts.push(`ahora: ${active.name}`);
+    if (run.currentVideoName) parts.push(run.currentVideoName);
+    if (run.failedVideos) parts.push(`${run.failedVideos} con error`);
+    setMessage(parts.join(" · "), run.failedVideos ? "error" : "ok");
+    els.plan.innerHTML = (run.accounts || []).map((account) => {
+      const detail = account.error ? ` · ${esc(account.error)}` : "";
+      const count = account.total ? ` · ${account.published || 0}/${account.total}` : "";
+      const labels = { pending: "Pendiente", processing: "En curso", completed: "Completada", failed: "Error", skipped: "Omitida", empty: "Sin vídeos nuevos", stopped: "Parada" };
+      return `<div class="autopost-plan-row"><span class="autopost-plan-video">${esc(account.name)}</span><span class="autopost-plan-when">${esc(labels[account.status] || account.status)}${count}${detail}</span></div>`;
+    }).join("");
+  }
+
+  async function startAllAccounts() {
+    if (!window.confirm("Se subirán y programarán hasta 9 vídeos nuevos por cuenta registrada, usando la carpeta AutoPost guardada en cada una. ¿Continuar?")) return;
+    const settingsByAccount = accountSettingsForBulk();
+    if (!Object.values(settingsByAccount).some((settings) => settings.folder)) {
+      setMessage("No hay carpetas AutoPost guardadas. Elige y guarda una carpeta para cada cuenta primero.", "error");
+      return;
+    }
+    els.bulkStartBtn.disabled = true;
+    els.startBtn.disabled = true;
+    setMessage("Iniciando lote de cuentas…");
+    try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const data = await API.post("/api/autoclone/schedule/all/start", { settingsByAccount, timezone });
+      renderBulkProgress(data?.run);
+      if (bulkPollTimer) clearInterval(bulkPollTimer);
+      bulkPollTimer = setInterval(async () => {
+        try {
+          const status = await API.get("/api/autoclone/schedule/status");
+          const run = status?.bulkRun;
+          renderBulkProgress(run);
+          if (!run?.running) {
+            clearInterval(bulkPollTimer);
+            bulkPollTimer = null;
+            els.bulkStartBtn.disabled = false;
+            els.startBtn.disabled = false;
+            const failed = (run?.accounts || []).filter((account) => account.status === "failed").length;
+            const skipped = (run?.accounts || []).filter((account) => ["skipped", "empty"].includes(account.status)).length;
+            if (run?.error) setMessage(`Lote terminado con un error: ${run.error}`, "error");
+            else setMessage(`Lote terminado: ${run?.done || 0} vídeos confirmados, ${failed} cuentas con error y ${skipped} omitidas.`, failed ? "error" : "ok");
+          }
+        } catch (error) {
+          clearInterval(bulkPollTimer);
+          bulkPollTimer = null;
+          els.bulkStartBtn.disabled = false;
+          els.startBtn.disabled = false;
+          setMessage(error.message, "error");
+        }
+      }, 2500);
+    } catch (error) {
+      els.bulkStartBtn.disabled = false;
+      els.startBtn.disabled = false;
+      setMessage(error.message, "error");
     }
   }
 
@@ -433,6 +521,7 @@
   els.previewBtn.addEventListener("click", preview);
   els.scheduleBtn.addEventListener("click", schedule);
   els.startBtn?.addEventListener("click", startNow);
+  els.bulkStartBtn?.addEventListener("click", startAllAccounts);
   els.stopBtn?.addEventListener("click", stopNow);
   els.logBtn?.addEventListener("click", loadDebugLog);
   els.logCopyBtn?.addEventListener("click", copyDebugLog);  els.useDestBtn.addEventListener("click", () => {
